@@ -1,0 +1,55 @@
+cabal-version:      3.0
+name:               wxr2pandoc
+version:            0.1.0.0
+-- synopsis:
+-- description:
+license:            MIT
+license-file:       LICENSE
+author:             ARATA Mizuki
+maintainer:         minorinoki@gmail.com
+-- copyright:
+category:           Text
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+-- extra-source-files:
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  WXR2Pandoc
+    -- other-modules:
+    -- other-extensions:
+    build-depends:    base >=4.19.0.0 && <4.23,
+                      text ^>=2.1.3,
+                      mtl ^>=2.3.2,
+                      xml-conduit ^>=1.10.1.0,
+                      pandoc ^>=3.8.3,
+                      time >=1.12.2 && <1.16
+    hs-source-dirs:   src
+    default-language: GHC2021
+
+executable wxr2pandoc
+    import:           warnings
+    main-is:          Main.hs
+    -- other-modules:
+    -- other-extensions:
+    build-depends:
+        base >=4.19.0.0 && <4.23,
+        wxr2pandoc
+
+    hs-source-dirs:   app
+    default-language: GHC2021
+
+test-suite wxr2pandoc-test
+    import:           warnings
+    default-language: GHC2021
+    -- other-modules:
+    -- other-extensions:
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:
+        base >=4.19.0.0 && <4.23,
+        wxr2pandoc
