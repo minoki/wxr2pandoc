@@ -26,7 +26,10 @@ library
                       mtl ^>=2.3.2,
                       xml-conduit ^>=1.10.1.0,
                       pandoc ^>=3.8.3,
-                      time >=1.12.2 && <1.16
+                      pandoc-types ^>=1.23.1,
+                      time >=1.12.2 && <1.16,
+                      aeson ^>=2.2.3.0,
+                      containers >=0.7 && <0.9
     hs-source-dirs:   src
     default-language: GHC2021
 
