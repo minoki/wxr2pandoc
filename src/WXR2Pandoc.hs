@@ -14,7 +14,7 @@ import Data.Maybe
 import Data.Time
 import Control.Monad.State.Strict
 import Control.Monad.Except
-import Text.Pandoc.Class (PandocPure(..))
+import Text.Pandoc.Class (PandocPure(..), runPure)
 import Text.Pandoc.Options (ReaderOptions(..), WriterOptions(..), def)
 import Text.Pandoc.Readers.HTML (readHtml)
 import Text.Pandoc.Writers.Markdown (writeCommonMark)
@@ -24,8 +24,11 @@ import Text.Pandoc.Extensions
 import Text.Pandoc.Definition as P
 import Text.Pandoc.Templates
 import qualified Text.Pandoc.Walk as P
+import qualified Text.Pandoc.Options as P
 import qualified Data.Aeson as JSON
 import qualified Data.Map as Map
+import qualified Data.Attoparsec.Text as A
+import Control.Applicative
 
 namespace_dc, namespace_wp, namespace_content :: Maybe T.Text
 namespace_dc = Just "http://purl.org/dc/elements/1.1/"
@@ -52,7 +55,7 @@ stripWpComment (RawInline (P.Format "html") content)
 stripWpComment inl = [inl]
 
 stripClass :: Block -> Block
-stripClass (CodeBlock (ident, classes, kv) content) = CodeBlock (ident, filter (/= "wp-block-preformatted") classes, kv) content
+stripClass (CodeBlock (ident, classes, kv) content) = CodeBlock (ident, filter (\cls -> cls /= "wp-block-preformatted" && cls /= "wp-block-code" && cls /= "wp-block-syntaxhighlighter-code") classes, kv) content
 stripClass b = b
 
 attachCodeBlockClass :: [Block] -> [Block]
@@ -63,6 +66,19 @@ attachCodeBlockClass (Para [RawInline (P.Format "html") tag] : CodeBlock (ident,
   , Just language <- Map.lookup "language" dat = CodeBlock (ident, language : classes, kv) content : attachCodeBlockClass xs
 attachCodeBlockClass (x : xs) = x : attachCodeBlockClass xs
 attachCodeBlockClass [] = []
+
+shortcodeP :: A.Parser ()
+shortcodeP = () <$ (A.char '[' *> A.many1 A.letter *> many attr *> A.char ']')
+  where
+    attr = A.space *> A.many1 A.letter *> A.char '=' *> A.char '"' *> many (A.notChar '"') *> A.char '"'
+
+-- (Str "...[caption") Space (Str "...]")
+extractWpShortcodeInline :: Inline -> [Inline]
+extractWpShortcodeInline (Str s) = undefined
+extractWpShortcodeInline inl = [inl]
+
+wpHtmlFilter :: Pandoc -> Pandoc
+wpHtmlFilter = P.walk stripClass . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
 
 data Post = Post { postTitle :: T.Text
                  , postLink :: T.Text
@@ -91,31 +107,37 @@ renderPostToFile post@Post{..} = do
   let meta = Meta $ Map.fromList $
                [("title", MetaString postTitle)]
                ++ [("draft", MetaBool True) | postStatus == "draft"]
+               ++ [("categories", MetaList (map MetaString postCategories))]
+               ++ [("tags", MetaList (map MetaString postTags))]
                ++ [("date", MetaString $ T.pack $ formatTime defaultTimeLocale rfc822DateFormat pd) | Just pd <- [postDate]]
   let readerOptions :: ReaderOptions
-      readerOptions = def { readerExtensions = readerExtensions def <> extensionsFromList [Ext_hard_line_breaks, Ext_raw_html, Ext_tex_math_single_backslash]
+      readerOptions = def { readerExtensions = readerExtensions def <> extensionsFromList [Ext_hard_line_breaks, Ext_raw_html, Ext_raw_tex, Ext_tex_math_single_backslash]
                           , readerStripComments = False
                           }
       writerOptions :: WriterOptions
-      writerOptions = def { writerExtensions = writerExtensions def <> extensionsFromList [Ext_hard_line_breaks, Ext_raw_html, Ext_tex_math_single_backslash, Ext_yaml_metadata_block]
+      writerOptions = def { writerExtensions = writerExtensions def <> extensionsFromList [Ext_raw_html, Ext_raw_tex, Ext_tex_math_single_backslash, Ext_yaml_metadata_block]
+                          , writerWrapText = P.WrapPreserve
                           }
       pandocAction = do doc <- readHtml readerOptions postContent
-                        -- tpl <- getDefaultTemplate "commonmark" >>= compileDefaultTemplate
-                        let Pandoc _ blocks = P.walk stripClass $ P.walk (concatMap stripWpComment) $ P.walk attachCodeBlockClass $ P.walk (concatMap splitBySoftBreakBlock) doc
-                        writeCommonMark (writerOptions {- writerTemplate = Just tpl -}) $ Pandoc meta blocks
-  case flip evalState def $ flip evalStateT def $ runExceptT $ unPandocPure pandocAction of
+                        tplResult <- runWithPartials $ compileTemplate "" "$if(titleblock)$\n$titleblock$\n\n$endif$\n$body$\n"
+                        let tpl = case tplResult of
+                                    Left e -> error e
+                                    Right t -> t
+                        let Pandoc _ blocks = wpHtmlFilter doc
+                        writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ Pandoc meta blocks
+  case runPure pandocAction of
     Left err -> print err
-    Right md -> T.writeFile path $ postTitle <> "\n\n" <> md
-  case flip evalState def $ flip evalStateT def $ runExceptT $ unPandocPure (readHtml readerOptions postContent >>= writeXML writerOptions) of
+    Right md -> T.writeFile path md
+  case runPure (readHtml readerOptions postContent >>= \doc -> writeXML writerOptions (wpHtmlFilter doc)) of
     Left err -> print err
-    Right pd -> do
-      let path_pd = "output/" ++ name ++ "-pandoc.txt"
-      T.writeFile path_pd $ postTitle <> "\n\n" <> pd
-  case flip evalState def $ flip evalStateT def $ runExceptT $ unPandocPure (readHtml readerOptions postContent >>= writeJSON writerOptions) of
+    Right doc -> do
+      let path_pd = "output/" ++ name ++ ".xml"
+      T.writeFile path_pd doc
+  case runPure (readHtml readerOptions postContent >>= \doc -> writeJSON writerOptions (wpHtmlFilter doc)) of
     Left err -> print err
-    Right pd -> do
-      let path_pd = "output/" ++ name ++ "-json.txt"
-      T.writeFile path_pd $ pd
+    Right doc -> do
+      let path_json = "output/" ++ name ++ ".json"
+      T.writeFile path_json doc
   let path_raw = "output/" ++ name ++ "-raw.txt"
   T.writeFile path_raw $ postTitle <> "\n\n" <> postContent
 
@@ -139,9 +161,21 @@ processFile_xmlconduit filename = do
         post_date_p = parseTimeM @Maybe @LocalTime True defaultTimeLocale "%Y-%m-%d %H:%M:%S" (T.unpack post_date)
     let post_date_gmt = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "post_date_gmt" namespace_wp Nothing) >=> XC.child >=> XC.content) -- yyyy-mm-dd hh:mm:ss
         post_date_gmt_p = parseTimeM @Maybe @LocalTime True defaultTimeLocale "%Y-%m-%d %H:%M:%S" (T.unpack post_date_gmt)
+    let post_modified = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "post_modified" namespace_wp Nothing) >=> XC.child >=> XC.content) -- yyyy-mm-dd hh:mm:ss
+        post_modified_p = parseTimeM @Maybe @LocalTime True defaultTimeLocale "%Y-%m-%d %H:%M:%S" (T.unpack post_modified)
+    let post_modified_gmt = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "post_modified_gmt" namespace_wp Nothing) >=> XC.child >=> XC.content) -- yyyy-mm-dd hh:mm:ss
+        post_modified_gmt_p = parseTimeM @Maybe @LocalTime True defaultTimeLocale "%Y-%m-%d %H:%M:%S" (T.unpack post_modified_gmt)
     let post_name = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "post_name" namespace_wp Nothing) >=> XC.child >=> XC.content)
     let post_status = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "status" namespace_wp Nothing) >=> XC.child >=> XC.content)
-    let category = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.child >=> XC.content)
+    let isCategory (XC.Element _ attrs _) = case Map.lookup (XC.Name "domain" Nothing Nothing) attrs of
+                                              Just "category" -> True
+                                              _ -> False
+    let isTag (XC.Element _ attrs _) = case Map.lookup (XC.Name "domain" Nothing Nothing) attrs of
+                                              Just "post_tag" -> True
+                                              _ -> False
+    let categories = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isCategory >=> XC.child >=> XC.content
+    let tags = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isTag >=> XC.child >=> XC.content
+    -- <wp:comment>...</wp:comment>
     -- print (title, link_content, pubDate_p, creator, post_name, post_id)
     case post_type of
       "post" -> do
@@ -157,8 +191,8 @@ processFile_xmlconduit filename = do
                              , postDateGmt = post_date_gmt_p
                              , postName = post_name
                              , postStatus = post_status
-                             , postCategories = []
-                             , postTags = []
+                             , postCategories = categories
+                             , postTags = tags
                              }
       "page" -> putStrLn $ T.unpack post_name ++ " / " ++ T.unpack title
       "attachment" -> do
