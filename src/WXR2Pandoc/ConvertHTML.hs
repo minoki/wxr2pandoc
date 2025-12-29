@@ -1,36 +1,23 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 module WXR2Pandoc.ConvertHTML where
+import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import qualified Data.Text.Read as T
-import System.Environment
-import qualified Text.XML as XC
-import qualified Text.XML.Cursor as XC
-import Control.Monad
-import Data.List
-import Data.Char
-import Data.Maybe
-import Data.Time
-import Control.Monad.State.Strict
-import Control.Monad.Except
-import Text.Pandoc.Class (PandocPure(..), runPure)
-import Text.Pandoc.Options (ReaderOptions(..), WriterOptions(..), def)
-import Text.Pandoc.Readers.HTML (readHtml)
-import Text.Pandoc.Writers.Markdown (writeCommonMark)
-import Text.Pandoc.Writers.XML (writeXML)
-import Text.Pandoc.Writers (writeJSON)
-import Text.Pandoc.Extensions
-import Text.Pandoc.Definition as P
-import Text.Pandoc.Templates
-import qualified Text.Pandoc.Walk as P
+import           Data.Time
+import           Text.Pandoc.Class (runPure)
+import           Text.Pandoc.Definition as P
+import           Text.Pandoc.Extensions
 import qualified Text.Pandoc.Options as P
-import qualified Data.Aeson as JSON
-import qualified Data.Map as Map
-import qualified Data.Attoparsec.Text as A
-import Control.Applicative
-import WXR2Pandoc.WXR
-import WXR2Pandoc.Filter
+import           Text.Pandoc.Options (ReaderOptions (..), WriterOptions (..),
+                                      def)
+import           Text.Pandoc.Readers.HTML (readHtml)
+import           Text.Pandoc.Templates
+import           Text.Pandoc.Writers (writeJSON)
+import           Text.Pandoc.Writers.Markdown (writeCommonMark)
+import           Text.Pandoc.Writers.XML (writeXML)
+import           WXR2Pandoc.Filter
+import           WXR2Pandoc.WXR
 
 -- 記事データを output/<slug>.txt および output/<slug>-raw.txt に書き出す。
 -- 前者は Markdown に変換したデータ、後者は生データ
@@ -57,7 +44,7 @@ renderPostToFile post@Post{..} = do
       pandocAction = do doc <- readHtml readerOptions postContent
                         tplResult <- runWithPartials $ compileTemplate "" "$if(titleblock)$\n$titleblock$\n\n$endif$\n$body$\n"
                         let tpl = case tplResult of
-                                    Left e -> error e
+                                    Left e  -> error e
                                     Right t -> t
                         let Pandoc _ blocks = wpHtmlFilter doc
                         writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ Pandoc meta blocks

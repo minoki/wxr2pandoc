@@ -1,46 +1,27 @@
 {-# LANGUAGE OverloadedStrings #-}
 module WXR2Pandoc.Filter where
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Text.Read as T
-import System.Environment
-import qualified Text.XML as XC
-import qualified Text.XML.Cursor as XC
-import Control.Monad
-import Data.List
-import Data.Char
-import Data.Maybe
-import Data.Time
-import Control.Monad.State.Strict
-import Control.Monad.Except
-import Text.Pandoc.Class (PandocPure(..), runPure)
-import Text.Pandoc.Options (ReaderOptions(..), WriterOptions(..), def)
-import Text.Pandoc.Readers.HTML (readHtml)
-import Text.Pandoc.Writers.Markdown (writeCommonMark)
-import Text.Pandoc.Writers.XML (writeXML)
-import Text.Pandoc.Writers (writeJSON)
-import Text.Pandoc.Extensions
-import Text.Pandoc.Definition as P
-import Text.Pandoc.Templates
-import qualified Text.Pandoc.Walk as P
-import qualified Text.Pandoc.Options as P
+import           Control.Applicative
 import qualified Data.Aeson as JSON
-import qualified Data.Map as Map
 import qualified Data.Attoparsec.Text as A
-import Control.Applicative
+import           Data.Char
+import           Data.List
+import qualified Data.Map as Map
+import qualified Data.Text as T
+import           Text.Pandoc.Definition as P
+import qualified Text.Pandoc.Walk as P
 
 splitBySoftBreak :: [Inline] -> [[Inline]]
 splitBySoftBreak = go []
   where
     go acc@(_:_) (SoftBreak : xs) = reverse acc : go [] xs
-    go [] (SoftBreak : xs) = go [] xs
-    go acc (x : xs) = go (x : acc) xs
-    go acc@(_:_) [] = [reverse acc]
-    go [] [] = []
+    go [] (SoftBreak : xs)        = go [] xs
+    go acc (x : xs)               = go (x : acc) xs
+    go acc@(_:_) []               = [reverse acc]
+    go [] []                      = []
 
 splitBySoftBreakBlock :: Block -> [Block]
 splitBySoftBreakBlock (Para inl) = map Para $ splitBySoftBreak inl
-splitBySoftBreakBlock block = [block]
+splitBySoftBreakBlock block      = [block]
 
 stripWpComment :: Inline -> [Inline]
 stripWpComment (RawInline (P.Format "html") content)
@@ -73,9 +54,9 @@ latexEnvironmentP :: A.Parser Inline
 latexEnvironmentP = (\(s,_) -> RawInline (P.Format "tex") s) <$> A.match p
   where
     p = do
-          A.string "\\begin{"
+          _ <- A.string "\\begin{"
           name <- A.takeWhile1 (\c -> isLetter c || c == '*')
-          A.char '}'
+          _ <- A.char '}'
           A.manyTill A.anyChar (A.string ("\\end{" <> name <> "}"))
 
 strElemP :: A.Parser Inline
@@ -86,8 +67,8 @@ strElemP = shortcodeP <|> closeShortcodeP <|> latexEnvironmentP <|> {- plainStrP
 
 mergeStr :: [Inline] -> [Inline]
 mergeStr (Str a : Str b : xs) = mergeStr (Str (a <> b) : xs)
-mergeStr (x : xs) = x : mergeStr xs
-mergeStr [] = []
+mergeStr (x : xs)             = x : mergeStr xs
+mergeStr []                   = []
 
 -- (Str "...[caption") Space (Str "...]...")
 -- (Str "...\\begin{align*}...") LineBreak (Str "...\\end{align*}...")
@@ -95,50 +76,50 @@ parseStr :: [Inline] -> [Inline]
 parseStr (Str s : xs) = parse s xs
   where
     parse "" xs = parseStr xs
-    parse s xs = go (A.parse strElemP s) xs
-    go (A.Done rest result) xs = result : parse rest xs
-    go (A.Partial more) (Str s : xs) = go (more s) xs
-    go (A.Partial more) (P.Space : xs) = go (more " ") xs
-    go (A.Partial more) (LineBreak : xs) = go (more "\n") xs
-    go (A.Partial more) xs = go (more "") xs
+    parse s xs  = go (A.parse strElemP s) xs
+    go (A.Done rest result) xs                 = result : parse rest xs
+    go (A.Partial more) (Str s : xs)           = go (more s) xs
+    go (A.Partial more) (P.Space : xs)         = go (more " ") xs
+    go (A.Partial more) (LineBreak : xs)       = go (more "\n") xs
+    go (A.Partial more) xs                     = go (more "") xs
     go (A.Fail notConsumed context message) xs = error $ "fail: " ++ message
 parseStr (inl : xs) = inl : parseStr xs
 parseStr [] = []
 
 testWpShortcode :: T.Text -> Maybe (T.Text, [(T.Text, T.Text)])
 testWpShortcode content = case A.parseOnly p content of
-    Left _ -> Nothing
+    Left _       -> Nothing
     Right result -> Just result
   where
-    p = do A.char '['
+    p = do _ <- A.char '['
            name <- A.takeWhile1 isLetter
            attrs <- many attr
-           A.char ']'
+           _ <- A.char ']'
            pure (name, attrs)
-    attr = do A.space
+    attr = do _ <- A.space
               attrName <- A.takeWhile1 isLetter
-              A.char '='
-              A.char '"'
+              _ <- A.char '='
+              _ <- A.char '"'
               val <- A.takeWhile (/= '"')
-              A.char '"'
+              _ <- A.char '"'
               pure (attrName, val)
 
 testWpCloseShortcode :: T.Text -> Maybe T.Text
 testWpCloseShortcode content = case A.parseOnly p content of
-    Left _ -> Nothing
+    Left _       -> Nothing
     Right result -> Just result
   where
-    p = do A.char '['
-           A.char '/'
+    p = do _ <- A.char '['
+           _ <- A.char '/'
            name <- A.takeWhile1 isLetter
-           A.char ']'
+           _ <- A.char ']'
            pure name
 
 collectCaption :: [Inline] -> ([Inline], [Inline])
 collectCaption = go [] []
   where
     stripSpace (P.Space : xs) = stripSpace xs
-    stripSpace xs = xs
+    stripSpace xs             = xs
     go content caption [] = (reverse content, stripSpace (reverse (stripSpace caption)))
     go content caption (x@(Str _) : xs) = go content (x : caption) xs
     go content caption (x@P.Space : xs) = go content (x : caption) xs
@@ -165,19 +146,19 @@ processWpShortcode (Para inlines : blocks) = goInlines [] inlines blocks
             (content, rest) ->
               let attrs' = case Data.List.lookup "align" attrs of
                             Just "center" -> ("", ["aligncenter"], [])
-                            _ -> ("", [], [])
+                            _             -> ("", [], [])
                   (content', caption) = collectCaption content
                   fig = Figure attrs' (Caption Nothing [Plain caption]) [Plain content']
               in Para (reverse revAcc) : fig : goInlines [] rest blocks
           Just ("code", attrs) ->
               let attr = case Data.List.lookup "lang" attrs of
                            Just lang -> ("", [lang], [])
-                           Nothing -> ("", [], [])
+                           Nothing   -> ("", [], [])
               in Para (reverse revAcc) : goSourcecode attr [] xs blocks
           Just ("sourcecode", attrs) ->
               let attr = case Data.List.lookup "lang" attrs of
                            Just lang -> ("", [lang], [])
-                           Nothing -> ("", [], [])
+                           Nothing   -> ("", [], [])
               in Para (reverse revAcc) : goSourcecode attr [] xs blocks
           _ -> goInlines (raw : revAcc) xs blocks
     goInlines revAcc (x : xs) blocks = goInlines (x : revAcc) xs blocks
@@ -196,8 +177,8 @@ processWpShortcode [] = []
 
 stripEmptyPara :: [Block] -> [Block]
 stripEmptyPara (Para [] : xs) = stripEmptyPara xs
-stripEmptyPara (x : xs) = x : stripEmptyPara xs
-stripEmptyPara [] = []
+stripEmptyPara (x : xs)       = x : stripEmptyPara xs
+stripEmptyPara []             = []
 
 wpHtmlFilter :: Pandoc -> Pandoc
 wpHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk processWpShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)

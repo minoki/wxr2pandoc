@@ -1,57 +1,37 @@
-{-# LANGUAGE StrictData #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StrictData #-}
 module WXR2Pandoc.WXR
   ( PostType(..)
   , Post(..)
   , processFile
   ) where
+import           Control.Monad
+import           Data.Char
+import qualified Data.Map as Map
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import qualified Data.Text.Read as T
-import System.Environment
+import           Data.Time
 import qualified Text.XML as XC
 import qualified Text.XML.Cursor as XC
-import Control.Monad
-import Data.List
-import Data.Char
-import Data.Maybe
-import Data.Time
-import Control.Monad.State.Strict
-import Control.Monad.Except
-import Text.Pandoc.Class (PandocPure(..), runPure)
-import Text.Pandoc.Options (ReaderOptions(..), WriterOptions(..), def)
-import Text.Pandoc.Readers.HTML (readHtml)
-import Text.Pandoc.Writers.Markdown (writeCommonMark)
-import Text.Pandoc.Writers.XML (writeXML)
-import Text.Pandoc.Writers (writeJSON)
-import Text.Pandoc.Extensions
-import Text.Pandoc.Definition as P
-import Text.Pandoc.Templates
-import qualified Text.Pandoc.Walk as P
-import qualified Text.Pandoc.Options as P
-import qualified Data.Aeson as JSON
-import qualified Data.Map as Map
-import qualified Data.Attoparsec.Text as A
-import Control.Applicative
 
 data PostType = TypePost
               | TypePage
               -- attachment?
               deriving (Eq, Show)
 
-data Post = Post { postType :: PostType
-                 , postTitle :: T.Text
-                 , postLink :: T.Text
-                 , postPubDate :: Maybe UTCTime
-                 , postCreator :: T.Text
-                 , postContent :: T.Text
-                 , postId :: Int
-                 , postDate :: Maybe LocalTime
-                 , postDateGmt :: Maybe LocalTime
-                 , postName :: T.Text
-                 , postStatus :: T.Text -- publish, draft, inherit
+data Post = Post { postType       :: PostType
+                 , postTitle      :: T.Text
+                 , postLink       :: T.Text
+                 , postPubDate    :: Maybe UTCTime
+                 , postCreator    :: T.Text
+                 , postContent    :: T.Text
+                 , postId         :: Int
+                 , postDate       :: Maybe LocalTime
+                 , postDateGmt    :: Maybe LocalTime
+                 , postName       :: T.Text
+                 , postStatus     :: T.Text -- publish, draft, inherit
                  , postCategories :: [T.Text]
-                 , postTags :: [T.Text]
+                 , postTags       :: [T.Text]
                  }
           | Attachment { attachmentUrl :: T.Text }
           deriving (Eq, Show)
@@ -87,8 +67,8 @@ processFile filename = do
     let content_encoded = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "encoded" namespace_content Nothing) >=> XC.child >=> XC.content)
     let post_id = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "post_id" namespace_wp Nothing) >=> XC.child >=> XC.content)
         post_id_i = case T.decimal post_id of
-                      Left err -> error err
-                      Right (x, _) -> x    
+                      Left err     -> error err
+                      Right (x, _) -> x
     let post_date = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "post_date" namespace_wp Nothing) >=> XC.child >=> XC.content) -- yyyy-mm-dd hh:mm:ss
         post_date_p = parseTimeM @Maybe @LocalTime True defaultTimeLocale "%Y-%m-%d %H:%M:%S" (T.unpack post_date)
     let post_date_gmt = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "post_date_gmt" namespace_wp Nothing) >=> XC.child >=> XC.content) -- yyyy-mm-dd hh:mm:ss
@@ -101,10 +81,10 @@ processFile filename = do
     let post_status = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "status" namespace_wp Nothing) >=> XC.child >=> XC.content)
     let isCategory (XC.Element _ attrs _) = case Map.lookup (XC.Name "domain" Nothing Nothing) attrs of
                                               Just "category" -> True
-                                              _ -> False
+                                              _               -> False
     let isTag (XC.Element _ attrs _) = case Map.lookup (XC.Name "domain" Nothing Nothing) attrs of
                                               Just "post_tag" -> True
-                                              _ -> False
+                                              _               -> False
     let categories = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isCategory >=> XC.child >=> XC.content
     let tags = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isTag >=> XC.child >=> XC.content
     -- <wp:comment>...</wp:comment>

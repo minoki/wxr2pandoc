@@ -1,21 +1,20 @@
 {-# LANGUAGE RecordWildCards #-}
 module Main (main) where
-import System.Environment
-import qualified Options.Applicative as OA
-import WXR2Pandoc.WXR (processFile)
-import WXR2Pandoc.ConvertHTML (renderPostToFile)
+import           Control.Applicative
+import           Control.Monad
 import qualified Data.Text as T
-import Control.Monad
-import Control.Applicative
+import qualified Options.Applicative as OA
+import           WXR2Pandoc.ConvertHTML (renderPostToFile)
+import           WXR2Pandoc.WXR (processFile)
 
 data AppOptions = AppOptions
-  { baseUrl :: Maybe T.Text
-  , outputDir :: String
-  , outputRaw :: Bool
-  , outputXml :: Bool
-  , outputJson :: Bool
+  { baseUrl        :: Maybe T.Text
+  , outputDir      :: String
+  , outputRaw      :: Bool
+  , outputXml      :: Bool
+  , outputJson     :: Bool
   , outputMarkdown :: Bool
-  , inputXml :: String
+  , inputXml       :: String
   }
 
 appOptions :: OA.Parser AppOptions
