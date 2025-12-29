@@ -3,6 +3,7 @@
 module WXR2Pandoc.WXR
   ( PostType(..)
   , Post(..)
+  , Item(..)
   , processFile
   ) where
 import           Control.Monad
@@ -33,7 +34,10 @@ data Post = Post { postType       :: PostType
                  , postCategories :: [T.Text]
                  , postTags       :: [T.Text]
                  }
-          | Attachment { attachmentUrl :: T.Text }
+          deriving (Eq, Show)
+
+data Item = ItemPost Post
+          | ItemAttachment { attachmentUrl :: T.Text }
           deriving (Eq, Show)
 
 namespace_dc, namespace_wp, namespace_content :: Maybe T.Text
@@ -41,7 +45,7 @@ namespace_dc = Just "http://purl.org/dc/elements/1.1/"
 namespace_wp = Just "http://wordpress.org/export/1.2/"
 namespace_content = Just "http://purl.org/rss/1.0/modules/content/"
 
-processFile :: FilePath -> IO [Post]
+processFile :: FilePath -> IO [Item]
 processFile filename = do
   doc <- XC.readFile XC.def filename
   let doc_cursor = XC.fromDocument doc
@@ -91,42 +95,42 @@ processFile filename = do
     -- print (title, link_content, pubDate_p, creator, post_name, post_id)
     case post_type of
       "post" -> do
-        pure [Post { postType = TypePost
-                   , postTitle = title
-                   , postLink = link_content
-                   , postPubDate = pubDate_p
-                   , postCreator = creator
-                   , postContent = content_encoded
-                   , postId = post_id_i
-                   , postDate = post_date_p
-                   , postDateGmt = post_date_gmt_p
-                   , postName = post_name
-                   , postStatus = post_status
-                   , postCategories = categories
-                   , postTags = tags
-                   }
+        pure [ItemPost $ Post { postType = TypePost
+                              , postTitle = title
+                              , postLink = link_content
+                              , postPubDate = pubDate_p
+                              , postCreator = creator
+                              , postContent = content_encoded
+                              , postId = post_id_i
+                              , postDate = post_date_p
+                              , postDateGmt = post_date_gmt_p
+                              , postName = post_name
+                              , postStatus = post_status
+                              , postCategories = categories
+                              , postTags = tags
+                              }
              ]
       "page" -> do
         -- putStrLn $ T.unpack post_name ++ " / " ++ T.unpack title
-        pure [Post { postType = TypePage
-                   , postTitle = title
-                   , postLink = link_content
-                   , postPubDate = pubDate_p
-                   , postCreator = creator
-                   , postContent = content_encoded
-                   , postId = post_id_i
-                   , postDate = post_date_p
-                   , postDateGmt = post_date_gmt_p
-                   , postName = post_name
-                   , postStatus = post_status
-                   , postCategories = categories
-                   , postTags = tags
-                   }
+        pure [ItemPost $ Post { postType = TypePage
+                              , postTitle = title
+                              , postLink = link_content
+                              , postPubDate = pubDate_p
+                              , postCreator = creator
+                              , postContent = content_encoded
+                              , postId = post_id_i
+                              , postDate = post_date_p
+                              , postDateGmt = post_date_gmt_p
+                              , postName = post_name
+                              , postStatus = post_status
+                              , postCategories = categories
+                              , postTags = tags
+                              }
              ]
       "attachment" -> do
         let attachment_url = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "attachment_url" namespace_wp Nothing) >=> XC.child >=> XC.content)
         -- putStrLn $ T.unpack attachment_url
-        pure [Attachment { attachmentUrl = attachment_url }]
+        pure [ItemAttachment { attachmentUrl = attachment_url }]
       "nav_menu_item" -> pure []
       "wp_global_styles" -> pure []
       "wp_navigation" -> pure []

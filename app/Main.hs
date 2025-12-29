@@ -5,7 +5,7 @@ import           Control.Monad
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
 import           WXR2Pandoc.ConvertHTML (renderPostToFile)
-import           WXR2Pandoc.WXR (processFile)
+import           WXR2Pandoc.WXR (Item (..), processFile)
 
 data AppOptions = AppOptions
   { baseUrl        :: Maybe T.Text
@@ -34,5 +34,7 @@ main = do
          <> OA.progDesc "Convert WordPress Extended RSS (WXR) file to Markdown using Pandoc"
          <> OA.header "wxr2pandoc")
   AppOptions {..} <- OA.execParser opts
-  posts <- processFile inputXml
-  forM_ posts $ \post -> renderPostToFile post
+  items <- processFile inputXml
+  forM_ items $ \item -> case item of
+    ItemPost p       -> renderPostToFile p
+    ItemAttachment _ -> pure ()
