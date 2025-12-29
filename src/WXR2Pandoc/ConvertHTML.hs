@@ -15,7 +15,7 @@ import           Text.Pandoc.Readers.HTML (readHtml)
 import           Text.Pandoc.Templates
 import           Text.Pandoc.Writers (writeJSON)
 import           Text.Pandoc.Writers.Markdown (writeCommonMark)
-import           Text.Pandoc.Writers.XML (writeXML)
+-- import           Text.Pandoc.Writers.XML (writeXML) -- pandoc >= 3.8
 import           WXR2Pandoc.Filter
 import           WXR2Pandoc.WXR
 
@@ -51,11 +51,13 @@ renderPostToFile post@Post{..} = do
   case runPure pandocAction of
     Left err -> print err
     Right md -> T.writeFile path md
+  {-
   case runPure (readHtml readerOptions postContent >>= \doc -> writeXML writerOptions (wpHtmlFilter doc)) of
     Left err -> print err
     Right doc -> do
       let path_pd = "output/" ++ name ++ ".xml"
       T.writeFile path_pd doc
+  -}
   case runPure (readHtml readerOptions postContent >>= \doc -> writeJSON writerOptions (wpHtmlFilter doc)) of
     Left err -> print err
     Right doc -> do
