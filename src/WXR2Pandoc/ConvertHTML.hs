@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
-module WXR2Pandoc.ConvertHTML where
+module WXR2Pandoc.ConvertHTML
+  ( HTMLReader(..)
+  , renderPostToFile
+  ) where
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -17,12 +20,16 @@ import           Text.Pandoc.Writers (writeJSON)
 import           Text.Pandoc.Writers.Markdown (writeCommonMark)
 -- import           Text.Pandoc.Writers.XML (writeXML) -- pandoc >= 3.8
 import           WXR2Pandoc.Filter
+import           WXR2Pandoc.ParseHTML
 import           WXR2Pandoc.WXR
 
--- 記事データを output/<slug>.txt および output/<slug>-raw.txt に書き出す。
--- 前者は Markdown に変換したデータ、後者は生データ
-renderPostToFile :: Post -> IO ()
-renderPostToFile post@Post{..} = do
+data HTMLReader = HTMLReaderPandoc | HTMLReaderCustom
+                deriving (Eq, Show)
+
+-- Writes post data to output/<slug>.md, output/<slug>.json, and output/<slug>-raw.txt
+-- The first is Markdown-converted data, the second is Pandoc JSON, the third is raw data
+renderPostToFile :: HTMLReader -> Post -> IO ()
+renderPostToFile htmlReader Post{..} = do
   let name = if T.null postName
              then show postId
              else T.unpack postName
@@ -41,7 +48,10 @@ renderPostToFile post@Post{..} = do
       writerOptions = def { writerExtensions = writerExtensions def <> extensionsFromList [Ext_raw_html, Ext_raw_tex, Ext_tex_math_single_backslash, Ext_yaml_metadata_block]
                           , writerWrapText = P.WrapPreserve
                           }
-      pandocAction = do doc <- readHtml readerOptions postContent
+      parseHtml = case htmlReader of
+                    HTMLReaderPandoc -> readHtml readerOptions postContent
+                    HTMLReaderCustom -> pure $ parseWpHtml postContent
+      pandocAction = do doc <- parseHtml
                         tplResult <- runWithPartials $ compileTemplate "" "$if(titleblock)$\n$titleblock$\n\n$endif$\n$body$\n"
                         let tpl = case tplResult of
                                     Left e  -> error e
@@ -58,7 +68,7 @@ renderPostToFile post@Post{..} = do
       let path_pd = "output/" ++ name ++ ".xml"
       T.writeFile path_pd doc
   -}
-  case runPure (readHtml readerOptions postContent >>= \doc -> writeJSON writerOptions (wpHtmlFilter doc)) of
+  case runPure (parseHtml >>= \doc -> writeJSON writerOptions (wpHtmlFilter doc)) of
     Left err -> print err
     Right doc -> do
       let path_json = "output/" ++ name ++ ".json"

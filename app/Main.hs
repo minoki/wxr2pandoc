@@ -4,7 +4,7 @@ import           Control.Applicative
 import           Control.Monad
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
-import           WXR2Pandoc.ConvertHTML (renderPostToFile)
+import           WXR2Pandoc.ConvertHTML (HTMLReader (..), renderPostToFile)
 import           WXR2Pandoc.WXR (Item (..), processFile)
 
 data AppOptions = AppOptions
@@ -14,6 +14,7 @@ data AppOptions = AppOptions
   , outputXml      :: Bool
   , outputJson     :: Bool
   , outputMarkdown :: Bool
+  , htmlReader     :: HTMLReader
   , inputXml       :: String
   }
 
@@ -25,6 +26,7 @@ appOptions = AppOptions
   <*> OA.switch (OA.long "pandoc-xml" <> OA.help "Emit Pandoc XML")
   <*> OA.switch (OA.long "pandoc-json" <> OA.help "Emit Pandoc JSON")
   <*> OA.switch (OA.long "markdown" <> OA.help "Emit Markdown")
+  <*> OA.flag HTMLReaderPandoc HTMLReaderCustom (OA.long "custom-parser" <> OA.help "Use custom HTML parser instead of Pandoc")
   <*> OA.argument OA.str (OA.metavar "FILE.xml")
 
 main :: IO ()
@@ -36,5 +38,5 @@ main = do
   AppOptions {..} <- OA.execParser opts
   items <- processFile inputXml
   forM_ items $ \item -> case item of
-    ItemPost p       -> renderPostToFile p
+    ItemPost p       -> renderPostToFile htmlReader p
     ItemAttachment _ -> pure ()
