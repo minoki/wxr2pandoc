@@ -43,12 +43,16 @@ shortcodeAttrP = do
   _ <- A.char '"'
   pure ()
 
+-- | Check if character is valid in shortcode name (letter, digit, or hyphen)
+isShortcodeNameChar :: Char -> Bool
+isShortcodeNameChar c = isLetter c || isDigit c || c == '-'
+
 -- | Parser for opening shortcode [name attr="val"] - preserves raw string
 openShortcodeP :: A.Parser Token
 openShortcodeP = do
   (src, _) <- A.match $ do
     _ <- A.char '['
-    _ <- A.takeWhile1 isLetter
+    _ <- A.takeWhile1 isShortcodeNameChar
     _ <- many shortcodeAttrP
     A.skipWhile isSpace
     _ <- A.char ']'
@@ -60,7 +64,7 @@ closeShortcodeP :: A.Parser Token
 closeShortcodeP = do
   (src, _) <- A.match $ do
     _ <- A.string "[/"
-    _ <- A.takeWhile1 isLetter
+    _ <- A.takeWhile1 isShortcodeNameChar
     _ <- A.char ']'
     pure ()
   pure $ TokShortcodeClose src

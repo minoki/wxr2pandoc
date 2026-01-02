@@ -341,6 +341,33 @@ shortcodeTests = testGroup "Shortcodes"
                   , SoftBreak, Space, Str "indented", SoftBreak
                   , RawInline (Format "wordpress") "[/code]"
                   ]]
+
+  , testCase "shortcode with hyphen in name" $
+      parseWpHtml "<p>[TeX-logo]</p>" @?=
+        doc [Para [RawInline (Format "wordpress") "[TeX-logo]"]]
+
+  , testCase "shortcode with number in name" $
+      parseWpHtml "<p>[h2o]</p>" @?=
+        doc [Para [RawInline (Format "wordpress") "[h2o]"]]
+
+  , testCase "closing shortcode with hyphen" $
+      parseWpHtml "<p>[/TeX-logo]</p>" @?=
+        doc [Para [RawInline (Format "wordpress") "[/TeX-logo]"]]
+
+  , testCase "shortcode pair with hyphen" $
+      parseWpHtml "<p>[my-code]content[/my-code]</p>" @?=
+        doc [Para [ RawInline (Format "wordpress") "[my-code]"
+                  , Str "content"
+                  , RawInline (Format "wordpress") "[/my-code]"
+                  ]]
+
+  , testCase "shortcode ending with number" $
+      parseWpHtml "<p>[version2]</p>" @?=
+        doc [Para [RawInline (Format "wordpress") "[version2]"]]
+
+  , testCase "shortcode with multiple hyphens" $
+      parseWpHtml "<p>[my-custom-shortcode]</p>" @?=
+        doc [Para [RawInline (Format "wordpress") "[my-custom-shortcode]"]]
   ]
 
 --------------------------------------------------------------------------------
@@ -445,10 +472,6 @@ pandocShortcodeTests = testGroup "Shortcodes"
       parsePandoc "<p>[toc]</p>" @?=
         doc [Para [RawInline (Format "html") "<!--toc-->"]]
 
-  -- Note: TeX-logo, LaTeX-logo etc. contain hyphens, which are not parsed
-  -- by the current shortcode parser (only letters). These remain as raw text.
-  -- If needed, the parser could be extended to support hyphens in shortcode names.
-
   , testCase "sourcecode shortcode with language" $
       parsePandoc "<p>[sourcecode lang=\"python\"]print(1)[/sourcecode]</p>" @?=
         doc [CodeBlock ("", ["python"], []) "print(1)"]
@@ -478,4 +501,31 @@ pandocShortcodeTests = testGroup "Shortcodes"
         doc [Figure ("", ["aligncenter"], [])
               (Caption Nothing [Plain [Str "My",Space,Str "caption"]])
               [Plain [Image ("", [], []) [] ("img.png", "")]]]
+
+  , testCase "shortcode with hyphen in name" $
+      parsePandoc "<p>[TeX-logo]</p>" @?=
+        doc [Para [Span ("", ["TeX-logo"], []) [Str "TeX"]]]
+
+  , testCase "shortcode with number in name" $
+      parsePandoc "<p>[h2o]</p>" @?=
+        doc [Para [RawInline (Format "wordpress") "[h2o]"]]
+
+  , testCase "closing shortcode with hyphen" $
+      parsePandoc "<p>[/TeX-logo]</p>" @?=
+        doc [Para [RawInline (Format "wordpress") "[/TeX-logo]"]]
+
+  , testCase "shortcode pair with hyphen" $
+      parsePandoc "<p>[my-code]content[/my-code]</p>" @?=
+        doc [Para [ RawInline (Format "wordpress") "[my-code]"
+                  , Str "content"
+                  , RawInline (Format "wordpress") "[/my-code]"
+                  ]]
+
+  , testCase "shortcode ending with number" $
+      parsePandoc "<p>[version2]</p>" @?=
+        doc [Para [RawInline (Format "wordpress") "[version2]"]]
+
+  , testCase "shortcode with multiple hyphens" $
+      parsePandoc "<p>[my-custom-shortcode]</p>" @?=
+        doc [Para [RawInline (Format "wordpress") "[my-custom-shortcode]"]]
   ]

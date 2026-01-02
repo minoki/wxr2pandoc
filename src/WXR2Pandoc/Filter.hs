@@ -3,12 +3,16 @@ module WXR2Pandoc.Filter where
 import           Control.Applicative
 import qualified Data.Aeson as JSON
 import qualified Data.Attoparsec.Text as A
-import           Data.Char
+import           Data.Char (isDigit, isLetter)
 import           Data.List
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import           Text.Pandoc.Definition as P
 import qualified Text.Pandoc.Walk as P
+
+-- | Check if character is valid in shortcode name (letter, digit, or hyphen)
+isShortcodeNameChar :: Char -> Bool
+isShortcodeNameChar c = isLetter c || isDigit c || c == '-'
 
 splitBySoftBreak :: [Inline] -> [[Inline]]
 splitBySoftBreak = go []
@@ -43,12 +47,12 @@ attachCodeBlockClass (x : xs) = x : attachCodeBlockClass xs
 attachCodeBlockClass [] = []
 
 shortcodeP :: A.Parser Inline
-shortcodeP = (\(s,_) -> RawInline (P.Format "wordpress") s) <$> A.match (A.char '[' *> A.many1 A.letter *> many attr *> A.char ']')
+shortcodeP = (\(s,_) -> RawInline (P.Format "wordpress") s) <$> A.match (A.char '[' *> A.takeWhile1 isShortcodeNameChar *> many attr *> A.char ']')
   where
     attr = A.space *> A.many1 A.letter *> A.char '=' *> A.char '"' *> many (A.notChar '"') *> A.char '"'
 
 closeShortcodeP :: A.Parser Inline
-closeShortcodeP = (\(s,_) -> RawInline (P.Format "wordpress") s) <$> A.match (A.string "[/" *> A.many1 A.letter *> A.char ']')
+closeShortcodeP = (\(s,_) -> RawInline (P.Format "wordpress") s) <$> A.match (A.string "[/" *> A.takeWhile1 isShortcodeNameChar *> A.char ']')
 
 latexEnvironmentP :: A.Parser Inline
 latexEnvironmentP = (\(s,_) -> RawInline (P.Format "tex") s) <$> A.match p
@@ -92,7 +96,7 @@ testWpShortcode content = case A.parseOnly p content of
     Right result -> Just result
   where
     p = do _ <- A.char '['
-           name <- A.takeWhile1 isLetter
+           name <- A.takeWhile1 isShortcodeNameChar
            attrs <- many attr
            _ <- A.char ']'
            pure (name, attrs)
@@ -111,7 +115,7 @@ testWpCloseShortcode content = case A.parseOnly p content of
   where
     p = do _ <- A.char '['
            _ <- A.char '/'
-           name <- A.takeWhile1 isLetter
+           name <- A.takeWhile1 isShortcodeNameChar
            _ <- A.char ']'
            pure name
 
