@@ -11,7 +11,7 @@ import           Data.Char (digitToInt, isDigit, isLetter, isSpace)
 import           Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
-import           Text.HTML.TagSoup (Tag (..), parseTags)
+import           Text.HTML.TagSoup (Tag (..), escapeHTML, parseTags)
 import           Text.Pandoc.Definition (Alignment (..), Attr, Block (..),
                                          Caption (..), Cell (..), ColSpan (..),
                                          ColWidth (..), Format (..),
@@ -586,12 +586,12 @@ tokenToInline (TokText t) = Str t  -- fallback, prefer tokenToInlines
 tokenToInline (TokShortcode _ src) = RawInline (Format "wordpress") src
 tokenToInline (TokShortcodeClose _ src) = RawInline (Format "wordpress") src
 tokenToInline (TokTagOpen name attrs) =
-  let attrStr = T.concat [" " <> n <> "=\"" <> v <> "\"" | (n, v) <- attrs]
+  let attrStr = T.concat [" " <> n <> "=\"" <> escapeHTML v <> "\"" | (n, v) <- attrs]
   in RawInline (Format "html") $ "<" <> name <> attrStr <> ">"
 tokenToInline (TokTagClose name) =
   RawInline (Format "html") $ "</" <> name <> ">"
 tokenToInline (TokTagSelfClose name attrs) =
-  let attrStr = T.concat [" " <> n <> "=\"" <> v <> "\"" | (n, v) <- attrs]
+  let attrStr = T.concat [" " <> n <> "=\"" <> escapeHTML v <> "\"" | (n, v) <- attrs]
   in RawInline (Format "html") $ "<" <> name <> attrStr <> " />"
 tokenToInline (TokNewlines _) = SoftBreak
 tokenToInline (TokMathInline content) = Math InlineMath content

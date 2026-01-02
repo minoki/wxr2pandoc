@@ -149,6 +149,14 @@ inlineTests = testGroup "Inline elements"
   , testCase "br creates line break" $
       parseWpHtml "<p>line1<br>line2</p>" @?=
         doc [Para [Str "line1", LineBreak, Str "line2"]]
+
+  , testCase "quotes in attribute 1" $
+      parseWpHtml "<p><a href=\"https://example.com\" title=\"&quot;ABC&quot;\">ABC</a></p>" @?=
+        doc [Para [Link ("", [], []) [Str "ABC"] ("https://example.com", "\"ABC\"")]]
+
+  , testCase "quotes in attribute 2" $
+      parseWpHtml "<p><x-abc title=\"&quot;ABC&quot;\">ABC</x-abc></p>" @?=
+        doc [Para [RawInline (Format "html") "<x-abc title=\"&quot;ABC&quot;\">", Str "ABC", RawInline (Format "html") "</x-abc>"]]
   ]
 
 -- | Block element tests
@@ -438,6 +446,14 @@ pandocInlineTests = testGroup "Inline elements"
   , testCase "nested inline elements" $
       parsePandoc "<p><strong><em>bold italic</em></strong></p>" @?=
         doc [Para [Strong [Emph [Str "bold",Space,Str "italic"]]]]
+
+  , testCase "quotes in attribute 1" $
+      parsePandoc "<p><a href=\"https://example.com\" title=\"&quot;ABC&quot;\">ABC</a></p>" @?=
+        doc [Para [Link ("", [], []) [Str "ABC"] ("https://example.com", "\"ABC\"")]]
+
+  , testCase "quotes in attribute 2" $
+      parsePandoc "<p><x-abc title=\"&quot;ABC&quot;\">ABC</x-abc></p>" @?=
+        doc [Para [RawInline (Format "html") "<x-abc title=\"&quot;ABC&quot;\">", Str "ABC", RawInline (Format "html") "</x-abc>"]]
   ]
 
 -- | Block element tests for Pandoc reader
