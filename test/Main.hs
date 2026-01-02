@@ -201,25 +201,25 @@ listTests :: TestTree
 listTests = testGroup "Lists"
   [ testCase "unordered list" $
       parseWpHtml "<ul><li>Item 1</li><li>Item 2</li></ul>" @?=
-        doc [BulletList [[Para [Str "Item", Space, Str "1"]], [Para [Str "Item", Space, Str "2"]]]]
+        doc [BulletList [[Plain [Str "Item", Space, Str "1"]], [Plain [Str "Item", Space, Str "2"]]]]
 
   , testCase "ordered list" $
       parseWpHtml "<ol><li>First</li><li>Second</li></ol>" @?=
         doc [OrderedList (1, DefaultStyle, DefaultDelim)
-              [[Para [Str "First"]], [Para [Str "Second"]]]]
+              [[Plain [Str "First"]], [Plain [Str "Second"]]]]
 
   , testCase "ordered list with start" $
       parseWpHtml "<ol start=\"5\"><li>Fifth</li></ol>" @?=
         doc [OrderedList (5, DefaultStyle, DefaultDelim)
-              [[Para [Str "Fifth"]]]]
+              [[Plain [Str "Fifth"]]]]
 
   , testCase "nested list" $
       parseWpHtml "<ul><li>Outer<ul><li>Inner</li></ul></li></ul>" @?=
-        doc [BulletList [[Para [Str "Outer"], BulletList [[Para [Str "Inner"]]]]]]
+        doc [BulletList [[Plain [Str "Outer"], BulletList [[Plain [Str "Inner"]]]]]]
 
   , testCase "definition list" $
       parseWpHtml "<dl><dt>Term</dt><dd>Definition</dd></dl>" @?=
-        doc [DefinitionList [([Str "Term"], [[Para [Str "Definition"]]])]]
+        doc [DefinitionList [([Str "Term"], [[Plain [Str "Definition"]]])]]
   ]
 
 -- | Table tests
@@ -435,6 +435,10 @@ pandocBlockTests = testGroup "Block elements"
       parsePandoc "<ol><li>First</li><li>Second</li></ol>" @?=
         doc [OrderedList (1, DefaultStyle, DefaultDelim)
               [[Plain [Str "First"]], [Plain [Str "Second"]]]]
+
+  , testCase "definition list" $
+      parsePandoc "<dl><dt>Term</dt><dd>Definition</dd></dl>" @?=
+        doc [DefinitionList [([Str "Term"], [[Plain [Str "Definition"]]])]]
   ]
 
 -- | wpHtmlFilter specific tests

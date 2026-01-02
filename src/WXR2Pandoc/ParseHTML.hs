@@ -179,61 +179,72 @@ headerLevel tag = do
     else Nothing
 
 -- | Parse tokens into blocks
+--   The Bool argument indicates whether an implicit Para should be converted to Plain.
+parseBlocks' :: Bool -> [Token] -> [Block]
+parseBlocks' _ [] = []
+parseBlocks' implicitParaAsPlain tokens =
+  let (blocks, rest) = parseBlock' implicitParaAsPlain tokens
+  in blocks ++ parseBlocks' implicitParaAsPlain rest
+
+-- | Parse tokens into blocks
 parseBlocks :: [Token] -> [Block]
-parseBlocks [] = []
-parseBlocks tokens =
-  let (blocks, rest) = parseBlock tokens
-  in blocks ++ parseBlocks rest
+parseBlocks = parseBlocks' False
 
 -- | Parse a single block, returns (blocks, remaining tokens)
-parseBlock :: [Token] -> ([Block], [Token])
-parseBlock [] = ([], [])
-parseBlock (TokTagOpen "p" _ : rest) =
+--   The Bool argument indicates whether an implicit Para should be converted to Plain.
+parseBlock' :: Bool -> [Token] -> ([Block], [Token])
+parseBlock' _ [] = ([], [])
+parseBlock' implicitParaAsPlain (TokTagOpen "p" _ : rest) =
   let (inlines, rest') = parseInlinesUntil "p" rest
   in ([Para $ mergeInlines inlines], rest')
-parseBlock (TokTagOpen "div" attrs : rest) =
-  let (blocks, rest') = parseBlocksUntil "div" rest
+parseBlock' implicitParaAsPlain (TokTagOpen "div" attrs : rest) =
+  let (blocks, rest') = parseBlocksUntil False "div" rest
   in ([Div (toAttr attrs) blocks], rest')
-parseBlock (TokTagOpen "ul" _ : rest) =
+parseBlock' implicitParaAsPlain (TokTagOpen "ul" _ : rest) =
   let (items, rest') = parseListItems "ul" rest
   in ([BulletList items], rest')
-parseBlock (TokTagOpen "ol" attrs : rest) =
+parseBlock' implicitParaAsPlain (TokTagOpen "ol" attrs : rest) =
   let (items, rest') = parseListItems "ol" rest
       startNum = maybe 1 fst $ lookup "start" attrs >>= either (const Nothing) Just . T.decimal
   in ([OrderedList (startNum, DefaultStyle, DefaultDelim) items], rest')
-parseBlock (TokTagOpen "pre" attrs : rest) =
+parseBlock' implicitParaAsPlain (TokTagOpen "pre" attrs : rest) =
   let (content, rest') = collectTextUntil "pre" rest
   in ([CodeBlock (toAttr attrs) content], rest')
-parseBlock (TokTagOpen "blockquote" _ : rest) =
-  let (blocks, rest') = parseBlocksUntil "blockquote" rest
+parseBlock' implicitParaAsPlain (TokTagOpen "blockquote" _ : rest) =
+  let (blocks, rest') = parseBlocksUntil False "blockquote" rest
   in ([BlockQuote blocks], rest')
-parseBlock (TokTagOpen tag attrs : rest)
+parseBlock' implicitParaAsPlain (TokTagOpen tag attrs : rest)
   | Just level <- headerLevel tag =
       let (inlines, rest') = parseInlinesUntil tag rest
       in ([Header level (toAttr attrs) $ mergeInlines inlines], rest')
-parseBlock (TokTagOpen "dl" _ : rest) =
+parseBlock' implicitParaAsPlain (TokTagOpen "dl" _ : rest) =
   let (items, rest') = parseDefList rest
   in ([DefinitionList items], rest')
-parseBlock (TokTagOpen "hr" _ : rest) = ([HorizontalRule], rest)
-parseBlock (TokTagClose "hr" : rest) = ([], rest)
-parseBlock (TokTagOpen "table" attrs : rest) =
+parseBlock' implicitParaAsPlain (TokTagOpen "hr" _ : rest) = ([HorizontalRule], rest)
+parseBlock' implicitParaAsPlain (TokTagClose "hr" : rest) = ([], rest)
+parseBlock' implicitParaAsPlain (TokTagOpen "table" attrs : rest) =
   let (table, rest') = parseTable attrs rest
   in ([table], rest')
-parseBlock (TokTagOpen "figure" attrs : rest) =
+parseBlock' implicitParaAsPlain (TokTagOpen "figure" attrs : rest) =
   let (caption, blocks, rest') = parseFigure rest
   in ([Figure (toAttr attrs) caption blocks], rest')
-parseBlock (TokTagOpen "br" _ : rest) = ([], rest)
-parseBlock (TokTagClose "br" : rest) = ([], rest)
-parseBlock (TokTagClose "img" : rest) = ([], rest)  -- img is self-closing
+parseBlock' implicitParaAsPlain (TokTagOpen "br" _ : rest) = ([], rest)
+parseBlock' implicitParaAsPlain (TokTagClose "br" : rest) = ([], rest)
+parseBlock' implicitParaAsPlain (TokTagClose "img" : rest) = ([], rest)  -- img is self-closing
 -- Skip unknown block close tags
-parseBlock (TokTagClose tag : rest)
+parseBlock' implicitParaAsPlain (TokTagClose tag : rest)
   | isBlockTag tag = ([], rest)
--- Collect inline content into a Para
-parseBlock (tok : rest) =
+-- Collect inline content into a Para or Plain
+parseBlock' implicitParaAsPlain (tok : rest) =
   let (inlines, rest') = collectInlines (tok : rest)
   in if null inlines
      then ([], rest)  -- Skip one token to ensure progress
-     else ([Para $ mergeInlines inlines], rest')
+     else let constructor = if implicitParaAsPlain then Plain else Para
+          in ([constructor $ mergeInlines inlines], rest')
+
+-- | Public wrapper for parseBlock' with default behavior (implicit Para is Para)
+parseBlock :: [Token] -> ([Block], [Token])
+parseBlock = parseBlock' False
 
 -- | Collect inline tokens until we hit a block tag or run out
 collectInlines :: [Token] -> ([Inline], [Token])
@@ -272,14 +283,14 @@ parseInlinesUntil closeTag = go []
     go acc (tok : rest) = go (reverse (tokenToInlines tok) ++ acc) rest
 
 -- | Parse blocks until closing tag
-parseBlocksUntil :: T.Text -> [Token] -> ([Block], [Token])
-parseBlocksUntil closeTag = go []
+parseBlocksUntil :: Bool -> T.Text -> [Token] -> ([Block], [Token])
+parseBlocksUntil implicitParaAsPlain closeTag = go []
   where
     go acc [] = (reverse acc, [])
     go acc (TokTagClose tag : rest)
       | tag == closeTag = (reverse acc, rest)
     go acc tokens =
-      let (blocks, rest) = parseBlock tokens
+      let (blocks, rest) = parseBlock' implicitParaAsPlain tokens
       in go (blocks ++ acc) rest
 
 -- | Collect text content until closing tag, stripping leading newline
@@ -326,7 +337,7 @@ parseListItems listTag = go []
           | tag == listTag = (blocksOrPlain acc, tokens)
         goItem acc tokens@(TokTagOpen "li" _ : _) = (blocksOrPlain acc, tokens)
         goItem acc tokens =
-          let (blocks, rest) = parseBlock tokens
+          let (blocks, rest) = parseBlock' True tokens
           in goItem (blocks ++ acc) rest
 
         blocksOrPlain []     = []
@@ -351,7 +362,7 @@ parseDefList = go []
         goDDs acc tokens@(TokTagClose "dl" : _) = (reverse acc, tokens)
         goDDs acc tokens@(TokTagOpen "dt" _ : _) = (reverse acc, tokens)
         goDDs acc (TokTagOpen "dd" _ : rest) =
-          let (blocks, rest') = parseBlocksUntil "dd" rest
+          let (blocks, rest') = parseBlocksUntil True "dd" rest
           in goDDs (blocks : acc) rest'
         goDDs acc (_ : rest) = goDDs acc rest
 
@@ -419,7 +430,7 @@ parseTableRow attrs = go []
         goCell acc (TokTagClose t : rest)
           | t == tag = (reverse acc, rest)
         goCell acc tokens =
-          let (blocks, rest) = parseBlock tokens
+          let (blocks, rest) = parseBlock' False tokens
           in goCell (blocks ++ acc) rest
 
 -- | Parse figure content
@@ -432,7 +443,7 @@ parseFigure = go Nothing []
       let (inlines, rest') = parseInlinesUntil "figcaption" rest
       in go (Just $ mergeInlines inlines) blocks rest'
     go caption blocks tokens =
-      let (blks, rest) = parseBlock tokens
+      let (blks, rest) = parseBlock' False tokens
       in go caption (blks ++ blocks) rest
 
     mkCaption Nothing        = Caption Nothing []
