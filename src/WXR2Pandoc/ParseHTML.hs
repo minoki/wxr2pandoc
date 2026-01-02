@@ -21,6 +21,7 @@ import           Text.Pandoc.Definition (Alignment (..), Attr, Block (..),
                                          RowHeadColumns (..), RowSpan (..),
                                          TableBody (..), TableFoot (..),
                                          TableHead (..))
+import           WXR2Pandoc.Filter (wpBasicHtmlFilter)
 
 -- | Token types for WordPress HTML
 data Token
@@ -28,8 +29,8 @@ data Token
   | TokTagOpen T.Text [(T.Text, T.Text)]      -- ^ HTML open tag <name attr="val">
   | TokTagClose T.Text                        -- ^ HTML close tag </name>
   | TokTagSelfClose T.Text [(T.Text, T.Text)] -- ^ Self-closing tag <name />
-  | TokShortcode T.Text                       -- ^ WordPress shortcode [name attr="val"] (raw string)
-  | TokShortcodeClose T.Text                  -- ^ Closing shortcode [/name] (raw string)
+  | TokShortcode T.Text T.Text                -- ^ WordPress shortcode: name, raw string [name attr="val"]
+  | TokShortcodeClose T.Text T.Text           -- ^ Closing shortcode: name, raw string [/name]
   | TokNewlines Int                           -- ^ Consecutive newlines (2+ means paragraph break)
   | TokMathInline T.Text                      -- ^ Inline math \(...\)
   | TokMathDisplay T.Text                     -- ^ Display math \[...\]
@@ -51,27 +52,27 @@ shortcodeAttrP = do
 isShortcodeNameChar :: Char -> Bool
 isShortcodeNameChar c = isLetter c || isDigit c || c == '-'
 
--- | Parser for opening shortcode [name attr="val"] - preserves raw string
+-- | Parser for opening shortcode [name attr="val"] - preserves raw string and extracts name
 openShortcodeP :: A.Parser Token
 openShortcodeP = do
-  (src, _) <- A.match $ do
+  (src, name) <- A.match $ do
     _ <- A.char '['
-    _ <- A.takeWhile1 isShortcodeNameChar
+    name <- A.takeWhile1 isShortcodeNameChar
     _ <- many shortcodeAttrP
     A.skipWhile isSpace
     _ <- A.char ']'
-    pure ()
-  pure $ TokShortcode src
+    pure name
+  pure $ TokShortcode name src
 
--- | Parser for closing shortcode [/name] - preserves raw string
+-- | Parser for closing shortcode [/name] - preserves raw string and extracts name
 closeShortcodeP :: A.Parser Token
 closeShortcodeP = do
-  (src, _) <- A.match $ do
+  (src, name) <- A.match $ do
     _ <- A.string "[/"
-    _ <- A.takeWhile1 isShortcodeNameChar
+    name <- A.takeWhile1 isShortcodeNameChar
     _ <- A.char ']'
-    pure ()
-  pure $ TokShortcodeClose src
+    pure name
+  pure $ TokShortcodeClose name src
 
 -- | Parser for shortcodes
 shortcodeP :: A.Parser Token
@@ -263,6 +264,11 @@ collectInlines = go []
     go acc (TokNewlines n : rest)
       | n >= 2 = (reverse acc, rest)
       | otherwise = go (SoftBreak : acc) rest
+    -- Handle [sourcecode] and [code] shortcodes with preserved whitespace
+    go acc (tok@(TokShortcode name _) : rest)
+      | isCodeShortcodeName name =
+          let (codeInlines, rest') = collectCodeShortcode name rest
+          in go (reverse (tokenToInline tok : codeInlines) ++ acc) rest'
     go acc (tok : rest) =
       go (reverse (tokenToInlines tok) ++ acc) rest
 
@@ -280,7 +286,35 @@ parseInlinesUntil closeTag = go []
           let (inlines, rest') = parseInline (TokTagOpen tag attrs : rest)
           in go (reverse inlines ++ acc) rest'
     go acc (TokNewlines _ : rest) = go (SoftBreak : acc) rest
+    -- Handle [sourcecode] and [code] shortcodes with preserved whitespace
+    go acc (tok@(TokShortcode name _) : rest)
+      | isCodeShortcodeName name =
+          let (codeInlines, rest') = collectCodeShortcode name rest
+          in go (reverse (tokenToInline tok : codeInlines) ++ acc) rest'
     go acc (tok : rest) = go (reverse (tokenToInlines tok) ++ acc) rest
+
+-- | Collect content inside [sourcecode]/[code] shortcodes, preserving whitespace
+--   Strips the first newline after the opening shortcode tag.
+--   Allows blank lines (multiple consecutive newlines) inside code blocks.
+--   Stops at block tags (like </p>) or the matching closing shortcode.
+collectCodeShortcode :: T.Text -> [Token] -> ([Inline], [Token])
+collectCodeShortcode openName tokens = go [] (stripLeadingNewline tokens)
+  where
+    -- Strip first newline token after open shortcode
+    stripLeadingNewline (TokNewlines _ : rest) = rest
+    stripLeadingNewline ts                     = ts
+
+    go acc [] = (reverse acc, [])
+    go acc (tok@(TokShortcodeClose closeName _) : rest)
+      | openName == closeName = (reverse (tokenToInline tok : acc), rest)
+    -- Allow any number of newlines (including blank lines) in code blocks
+    go acc (TokNewlines n : rest) = go (Str (T.replicate n "\n") : acc) rest
+    -- Stop at block tags
+    go acc tokens@(TokTagClose tag : _)
+      | isBlockTag tag = (reverse acc, tokens)
+    go acc tokens@(TokTagOpen tag _ : _)
+      | isBlockTag tag = (reverse acc, tokens)
+    go acc (tok : rest) = go (reverse (tokenToInlinesPreserve tok) ++ acc) rest
 
 -- | Parse blocks until closing tag
 parseBlocksUntil :: Bool -> T.Text -> [Token] -> ([Block], [Token])
@@ -312,8 +346,8 @@ collectTextUntil closeTag tokens = go [] (stripLeadingNewline tokens)
     go acc (TokNewlines n : rest) = go (T.replicate n "\n" : acc) rest
     go acc (TokTagOpen "code" _ : rest) = go acc (stripLeadingNewline rest)
     go acc (TokTagClose "code" : rest) = go acc rest
-    go acc (TokShortcode t : rest) = go (t : acc) rest
-    go acc (TokShortcodeClose t : rest) = go (t : acc) rest
+    go acc (TokShortcode _ src : rest) = go (src : acc) rest
+    go acc (TokShortcodeClose _ src : rest) = go (src : acc) rest
     go acc (_ : rest) = go acc rest
 
 -- | Parse list items
@@ -524,16 +558,32 @@ textToInlines t =
         Just (c, _) | isHorizWhitespace c -> [Space]
                     | otherwise -> [Str chunk]
 
+-- | Check if shortcode name is sourcecode or code
+isCodeShortcodeName :: T.Text -> Bool
+isCodeShortcodeName name = name == "sourcecode" || name == "code"
+
+-- | Convert text to Str preserving whitespace (for code blocks)
+textToInlinesPreserve :: T.Text -> [Inline]
+textToInlinesPreserve t
+  | T.null t  = []
+  | otherwise = [Str t]
+
 -- | Convert token to Pandoc Inlines (for non-tag tokens)
 tokenToInlines :: Token -> [Inline]
 tokenToInlines (TokText t) = textToInlines t
 tokenToInlines tok         = [tokenToInline tok]
 
+-- | Convert token to Pandoc Inlines preserving whitespace (for code shortcodes)
+tokenToInlinesPreserve :: Token -> [Inline]
+tokenToInlinesPreserve (TokText t)     = textToInlinesPreserve t
+tokenToInlinesPreserve (TokNewlines n) = [Str $ T.replicate n "\n"]
+tokenToInlinesPreserve tok             = [tokenToInline tok]
+
 -- | Convert token to Pandoc Inline (for non-tag tokens, non-text)
 tokenToInline :: Token -> Inline
 tokenToInline (TokText t) = Str t  -- fallback, prefer tokenToInlines
-tokenToInline (TokShortcode src) = RawInline (Format "wordpress") src
-tokenToInline (TokShortcodeClose src) = RawInline (Format "wordpress") src
+tokenToInline (TokShortcode _ src) = RawInline (Format "wordpress") src
+tokenToInline (TokShortcodeClose _ src) = RawInline (Format "wordpress") src
 tokenToInline (TokTagOpen name attrs) =
   let attrStr = T.concat [" " <> n <> "=\"" <> v <> "\"" | (n, v) <- attrs]
   in RawInline (Format "html") $ "<" <> name <> attrStr <> ">"
@@ -560,4 +610,4 @@ parseWpHtml html =
   let html' = T.filter (/= '\r') html  -- Remove CR from CRLF
       tokens = tokenize html'
       blocks = parseBlocks tokens
-  in Pandoc mempty blocks
+  in wpBasicHtmlFilter $ Pandoc mempty blocks

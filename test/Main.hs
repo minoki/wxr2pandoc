@@ -288,18 +288,32 @@ shortcodeTests = testGroup "Shortcodes"
 
   , testCase "shortcode pair" $
       parseWpHtml "<p>[code]x = 1[/code]</p>" @?=
-        doc [Para [ RawInline (Format "wordpress") "[code]"
-                  , Str "x", Space, Str "=", Space, Str "1"
-                  , RawInline (Format "wordpress") "[/code]"
-                  ]]
+        doc [CodeBlock ("", [], []) "x = 1"]
 
+  -- Note: Unclosed [sourcecode] becomes an empty CodeBlock
   , testCase "shortcode with lang attribute" $
       parseWpHtml "<p>[sourcecode lang=\"python\"]</p>" @?=
-        doc [Para [RawInline (Format "wordpress") "[sourcecode lang=\"python\"]"]]
+        doc [CodeBlock ("", ["python"], []) ""]
+
+  , testCase "code shortcode" $
+      parseWpHtml "<p>[code lang=\"haskell\"]main = print 1[/code]</p>" @?=
+        doc [CodeBlock ("", ["haskell"], []) "main = print 1"]
+
+  , testCase "sourcecode with multiline content" $
+      parseWpHtml "<p>[sourcecode lang=\"python\"]def foo():\n    return 1[/sourcecode]</p>" @?=
+        doc [CodeBlock ("", ["python"], []) "def foo():\n    return 1"]
+
+  , testCase "sourcecode with newline after open tag" $
+      parseWpHtml "<p>[sourcecode lang=\"haskell\"]\nmain = print 1\n[/sourcecode]</p>" @?=
+        doc [CodeBlock ("", ["haskell"], []) "main = print 1\n"]
+
+  , testCase "code shortcode with indented multiline" $
+      parseWpHtml "<p>[code lang=\"python\"]\ndef foo():\n    x = 1\n    return x\n[/code]</p>" @?=
+        doc [CodeBlock ("", ["python"], []) "def foo():\n    x = 1\n    return x\n"]
 
   , testCase "caption shortcode" $
       parseWpHtml "<p>[caption align=\"center\"]</p>" @?=
-        doc [Para [RawInline (Format "wordpress") "[caption align=\"center\"]"]]
+        doc [Figure ("", ["aligncenter"], []) (Caption Nothing [Plain []]) [Plain []]]
 
   , testCase "shortcode mixed with text" $
       parseWpHtml "<p>Before [gallery] after</p>" @?=
@@ -320,31 +334,21 @@ shortcodeTests = testGroup "Shortcodes"
       parseWpHtml "<pre>code here</pre>" @?=
         doc [CodeBlock ("", [], []) "code here"]
 
-  , testCase "shortcode with multiline content" $
+  , testCase "code shortcode with multiline content" $
       parseWpHtml "<p>[code]line1\nline2[/code]</p>" @?=
-        doc [Para [ RawInline (Format "wordpress") "[code]"
-                  , Str "line1", SoftBreak, Str "line2"
-                  , RawInline (Format "wordpress") "[/code]"
-                  ]]
+        doc [CodeBlock ("", [], []) "line1\nline2"]
 
-  , testCase "shortcode with newline after open tag" $
+  , testCase "code shortcode with newline after open tag" $
       parseWpHtml "<p>[code]\nline1\n[/code]</p>" @?=
-        doc [Para [ RawInline (Format "wordpress") "[code]"
-                  , SoftBreak, Str "line1", SoftBreak
-                  , RawInline (Format "wordpress") "[/code]"
-                  ]]
+        doc [CodeBlock ("", [], []) "line1\n"]
 
-  -- Note: Leading spaces are converted to Space token by textToInlines
   , testCase "shortcode with indented content" $
       parseWpHtml "<p>[code]\n    indented\n[/code]</p>" @?=
-        doc [Para [ RawInline (Format "wordpress") "[code]"
-                  , SoftBreak, Space, Str "indented", SoftBreak
-                  , RawInline (Format "wordpress") "[/code]"
-                  ]]
+        doc [CodeBlock ("", [], []) "    indented\n"]
 
   , testCase "shortcode with hyphen in name" $
       parseWpHtml "<p>[TeX-logo]</p>" @?=
-        doc [Para [RawInline (Format "wordpress") "[TeX-logo]"]]
+        doc [Para [Span ("", ["TeX-logo"], []) [Str "TeX"]]]
 
   , testCase "shortcode with number in name" $
       parseWpHtml "<p>[h2o]</p>" @?=
@@ -368,6 +372,14 @@ shortcodeTests = testGroup "Shortcodes"
   , testCase "shortcode with multiple hyphens" $
       parseWpHtml "<p>[my-custom-shortcode]</p>" @?=
         doc [Para [RawInline (Format "wordpress") "[my-custom-shortcode]"]]
+
+  , testCase "code shortcode with blank line" $
+      parseWpHtml "<p>[code]\ndef foo():\n    pass\n\ndef bar():\n    pass\n[/code]</p>" @?=
+        doc [CodeBlock ("", [], []) "def foo():\n    pass\n\ndef bar():\n    pass\n"]
+
+  , testCase "sourcecode with multiple blank lines" $
+      parseWpHtml "<p>[sourcecode lang=\"python\"]\nline1\n\n\nline2\n[/sourcecode]</p>" @?=
+        doc [CodeBlock ("", ["python"], []) "line1\n\n\nline2\n"]
   ]
 
 --------------------------------------------------------------------------------

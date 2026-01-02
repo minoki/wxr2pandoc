@@ -186,3 +186,6 @@ stripEmptyPara []             = []
 
 wpHtmlFilter :: Pandoc -> Pandoc
 wpHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk processWpShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
+
+wpBasicHtmlFilter :: Pandoc -> Pandoc
+wpBasicHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk processWpShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass
