@@ -6,17 +6,21 @@ module WXR2Pandoc.ParseHTML
   ) where
 
 import           Control.Applicative
-import           Data.Char (digitToInt, isDigit, isLetter, isSpace)
 import qualified Data.Attoparsec.Text as A
+import           Data.Char (digitToInt, isDigit, isLetter, isSpace)
+import           Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
-import           Text.HTML.TagSoup (Tag(..), parseTags)
-import           Text.Pandoc.Definition
-                   (Pandoc(..), Block(..), Inline(..), Format(..), MathType(..),
-                    Attr, ListNumberStyle(..), ListNumberDelim(..), Caption(..),
-                    TableHead(..), TableBody(..), TableFoot(..), Row(..), Cell(..),
-                    Alignment(..), ColWidth(..), RowHeadColumns(..),
-                    RowSpan(..), ColSpan(..))
+import           Text.HTML.TagSoup (Tag (..), parseTags)
+import           Text.Pandoc.Definition (Alignment (..), Attr, Block (..),
+                                         Caption (..), Cell (..), ColSpan (..),
+                                         ColWidth (..), Format (..),
+                                         Inline (..), ListNumberDelim (..),
+                                         ListNumberStyle (..), MathType (..),
+                                         Pandoc (..), Row (..),
+                                         RowHeadColumns (..), RowSpan (..),
+                                         TableBody (..), TableFoot (..),
+                                         TableHead (..))
 
 -- | Token types for WordPress HTML
 data Token
@@ -279,13 +283,15 @@ parseBlocksUntil closeTag = go []
       in go (blocks ++ acc) rest
 
 -- | Collect text content until closing tag, stripping leading newline
+--
+-- Used by pre element.
 collectTextUntil :: T.Text -> [Token] -> (T.Text, [Token])
 collectTextUntil closeTag tokens = go [] (stripLeadingNewline tokens)
   where
     -- Strip first newline token after open tag (handles <pre>\n case)
     stripLeadingNewline (TokNewlines _ : rest) = rest
-    stripLeadingNewline (TokTagOpen "code" attrs : TokNewlines _ : rest) =
-      TokTagOpen "code" attrs : rest
+    stripLeadingNewline (tag@(TokTagOpen "code" attrs) : TokNewlines _ : rest) =
+      tag : rest
     stripLeadingNewline ts = ts
 
     go acc [] = (T.concat $ reverse acc, [])
@@ -295,6 +301,8 @@ collectTextUntil closeTag tokens = go [] (stripLeadingNewline tokens)
     go acc (TokNewlines n : rest) = go (T.replicate n "\n" : acc) rest
     go acc (TokTagOpen "code" _ : rest) = go acc (stripLeadingNewline rest)
     go acc (TokTagClose "code" : rest) = go acc rest
+    go acc (TokShortcode t : rest) = go (t : acc) rest
+    go acc (TokShortcodeClose t : rest) = go (t : acc) rest
     go acc (_ : rest) = go acc rest
 
 -- | Parse list items
@@ -321,7 +329,7 @@ parseListItems listTag = go []
           let (blocks, rest) = parseBlock tokens
           in goItem (blocks ++ acc) rest
 
-        blocksOrPlain [] = []
+        blocksOrPlain []     = []
         blocksOrPlain blocks = reverse blocks
 
 -- | Parse definition list items
@@ -351,16 +359,13 @@ parseDefList = go []
 parseTable :: [(T.Text, T.Text)] -> [Token] -> (Block, [Token])
 parseTable attrs tokens =
   let (headRows, bodyRows, rest) = parseTableContent tokens
-      colCount = if null headRows then maybe 0 (length . (\(Row _ cells) -> cells)) (listToMaybe bodyRows)
-                 else maybe 0 (length . (\(Row _ cells) -> cells)) (listToMaybe headRows)
+      colCount = if null headRows then maybe 0 (\(Row _ cells) -> length cells) (listToMaybe bodyRows)
+                 else maybe 0 (\(Row _ cells) -> length cells) (listToMaybe headRows)
       colSpecs = replicate colCount (AlignDefault, ColWidthDefault)
       thead = TableHead nullAttr headRows
       tbody = [TableBody nullAttr (RowHeadColumns 0) [] bodyRows | not (null bodyRows)]
       tfoot = TableFoot nullAttr []
   in (Table (toAttr attrs) (Caption Nothing []) colSpecs thead tbody tfoot, rest)
-  where
-    listToMaybe [] = Nothing
-    listToMaybe (x:_) = Just x
 
 -- | Parse table content (thead, tbody rows)
 parseTableContent :: [Token] -> ([Row], [Row], [Token])
@@ -410,15 +415,12 @@ parseTableRow attrs = go []
     parseCellContent :: T.Text -> [Token] -> ([Block], [Token])
     parseCellContent tag = goCell []
       where
-        goCell acc [] = (cellBlocks acc, [])
+        goCell acc [] = (reverse acc, [])
         goCell acc (TokTagClose t : rest)
-          | t == tag = (cellBlocks acc, rest)
+          | t == tag = (reverse acc, rest)
         goCell acc tokens =
           let (blocks, rest) = parseBlock tokens
           in goCell (blocks ++ acc) rest
-
-        cellBlocks [] = []
-        cellBlocks blocks = reverse blocks
 
 -- | Parse figure content
 parseFigure :: [Token] -> (Caption, [Block], [Token])
@@ -433,7 +435,7 @@ parseFigure = go Nothing []
       let (blks, rest) = parseBlock tokens
       in go caption (blks ++ blocks) rest
 
-    mkCaption Nothing = Caption Nothing []
+    mkCaption Nothing        = Caption Nothing []
     mkCaption (Just inlines) = Caption Nothing [Plain inlines]
 
 -- | Parse a single inline element
@@ -443,8 +445,8 @@ parseInline (TokTagOpen "code" attrs : rest) =
   let (content, rest') = collectCodeContent rest
   in ([Code (toAttr attrs) content], rest')
 parseInline (TokTagOpen "a" attrs : rest) =
-  let href = maybe "" id $ lookup "href" attrs
-      title = maybe "" id $ lookup "title" attrs
+  let href = fromMaybe "" $ lookup "href" attrs
+      title = fromMaybe "" $ lookup "title" attrs
       attrs' = filter (\(k, _) -> k /= "href" && k /= "title") attrs
       (inlines, rest') = parseInlinesUntil "a" rest
   in ([Link (toAttr attrs') (mergeInlines inlines) (href, title)], rest')
@@ -467,9 +469,9 @@ parseInline (TokTagOpen "s" _ : rest) =
   let (inlines, rest') = parseInlinesUntil "s" rest
   in ([Strikeout $ mergeInlines inlines], rest')
 parseInline (TokTagOpen "img" attrs : rest) =
-  let src = maybe "" id $ lookup "src" attrs
-      alt = maybe "" id $ lookup "alt" attrs
-      title = maybe "" id $ lookup "title" attrs
+  let src = fromMaybe "" $ lookup "src" attrs
+      alt = fromMaybe "" $ lookup "alt" attrs
+      title = fromMaybe "" $ lookup "title" attrs
       attrs' = filter (\(k, _) -> k `notElem` ["src", "alt", "title"]) attrs
   in ([Image (toAttr attrs') [Str alt] (src, title)], rest)
 parseInline (TokTagOpen "br" _ : rest) = ([LineBreak], rest)
@@ -488,11 +490,11 @@ parseInline (tok : rest) = ([tokenToInline tok], rest)
 collectCodeContent :: [Token] -> (T.Text, [Token])
 collectCodeContent = go []
   where
-    go acc [] = (T.concat $ reverse acc, [])
+    go acc []                          = (T.concat $ reverse acc, [])
     go acc (TokTagClose "code" : rest) = (T.concat $ reverse acc, rest)
-    go acc (TokText t : rest) = go (t : acc) rest
-    go acc (TokNewlines n : rest) = go (T.replicate n "\n" : acc) rest
-    go acc (_ : rest) = go acc rest
+    go acc (TokText t : rest)          = go (t : acc) rest
+    go acc (TokNewlines n : rest)      = go (T.replicate n "\n" : acc) rest
+    go acc (_ : rest)                  = go acc rest
 
 -- | Check if character is horizontal whitespace (space or tab)
 isHorizWhitespace :: Char -> Bool
@@ -505,15 +507,16 @@ textToInlines t =
       sameType a b = isHorizWhitespace a == isHorizWhitespace b
   in concatMap chunkToInline chunks
   where
-    chunkToInline chunk
-      | T.null chunk = []
-      | isHorizWhitespace (T.head chunk) = [Space]
-      | otherwise = [Str chunk]
+    chunkToInline chunk =
+      case T.uncons chunk of
+        Nothing -> []
+        Just (c, _) | isHorizWhitespace c -> [Space]
+                    | otherwise -> [Str chunk]
 
 -- | Convert token to Pandoc Inlines (for non-tag tokens)
 tokenToInlines :: Token -> [Inline]
 tokenToInlines (TokText t) = textToInlines t
-tokenToInlines tok = [tokenToInline tok]
+tokenToInlines tok         = [tokenToInline tok]
 
 -- | Convert token to Pandoc Inline (for non-tag tokens, non-text)
 tokenToInline :: Token -> Inline
@@ -537,8 +540,8 @@ tokenToInline (TokLatexEnv src) = RawInline (Format "tex") src
 mergeInlines :: [Inline] -> [Inline]
 mergeInlines (Str a : Str b : xs) = mergeInlines (Str (a <> b) : xs)
 mergeInlines (Space : Space : xs) = mergeInlines (Space : xs)
-mergeInlines (x : xs) = x : mergeInlines xs
-mergeInlines [] = []
+mergeInlines (x : xs)             = x : mergeInlines xs
+mergeInlines []                   = []
 
 -- | Convert WordPress HTML string to Pandoc AST
 parseWpHtml :: T.Text -> Pandoc
