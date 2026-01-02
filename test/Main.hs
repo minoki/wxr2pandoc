@@ -66,13 +66,13 @@ basicTests = testGroup "Basic"
       parseWpHtml "" @?= doc []
 
   , testCase "plain text becomes paragraph" $
-      parseWpHtml "Hello world" @?= doc [Para [Str "Hello world"]]
+      parseWpHtml "Hello world" @?= doc [Para [Str "Hello", Space, Str "world"]]
 
   , testCase "simple paragraph" $
       parseWpHtml "<p>Hello</p>" @?= doc [Para [Str "Hello"]]
 
   , testCase "paragraph with spaces" $
-      parseWpHtml "<p>Hello world</p>" @?= doc [Para [Str "Hello world"]]
+      parseWpHtml "<p>Hello world</p>" @?= doc [Para [Str "Hello", Space, Str "world"]]
 
   , testCase "multiple paragraphs" $
       parseWpHtml "<p>First</p><p>Second</p>" @?=
@@ -136,7 +136,7 @@ inlineTests = testGroup "Inline elements"
 
   , testCase "nested inline elements" $
       parseWpHtml "<p><strong><em>bold italic</em></strong></p>" @?=
-        doc [Para [Strong [Emph [Str "bold italic"]]]]
+        doc [Para [Strong [Emph [Str "bold", Space, Str "italic"]]]]
 
   , testCase "br creates line break" $
       parseWpHtml "<p>line1<br>line2</p>" @?=
@@ -175,11 +175,11 @@ blockTests = testGroup "Block elements"
 
   , testCase "pre block with newline after open tag" $
       parseWpHtml "<pre>\nline1\nline2\n</pre>" @?=
-        doc [CodeBlock ("", [], []) "\nline1\nline2\n"]
+        doc [CodeBlock ("", [], []) "line1\nline2\n"]
 
   , testCase "pre/code block with newline after tags" $
       parseWpHtml "<pre><code>\nmain = print 1\n</code></pre>" @?=
-        doc [CodeBlock ("", [], []) "\nmain = print 1\n"]
+        doc [CodeBlock ("", [], []) "main = print 1\n"]
 
   , testCase "hr" $
       parseWpHtml "<p>before</p><hr><p>after</p>" @?=
@@ -187,7 +187,7 @@ blockTests = testGroup "Block elements"
 
   , testCase "div" $
       parseWpHtml "<div class=\"note\"><p>Note content</p></div>" @?=
-        doc [Div ("", ["note"], []) [Para [Str "Note content"]]]
+        doc [Div ("", ["note"], []) [Para [Str "Note", Space, Str "content"]]]
 
   , testCase "figure with caption" $
       parseWpHtml "<figure><img src=\"img.png\" alt=\"\"><figcaption>Caption</figcaption></figure>" @?=
@@ -201,7 +201,7 @@ listTests :: TestTree
 listTests = testGroup "Lists"
   [ testCase "unordered list" $
       parseWpHtml "<ul><li>Item 1</li><li>Item 2</li></ul>" @?=
-        doc [BulletList [[Para [Str "Item 1"]], [Para [Str "Item 2"]]]]
+        doc [BulletList [[Para [Str "Item", Space, Str "1"]], [Para [Str "Item", Space, Str "2"]]]]
 
   , testCase "ordered list" $
       parseWpHtml "<ol><li>First</li><li>Second</li></ol>" @?=
@@ -260,7 +260,7 @@ mathTests :: TestTree
 mathTests = testGroup "Math"
   [ testCase "inline math" $
       parseWpHtml "<p>The formula \\(x^2\\) is simple</p>" @?=
-        doc [Para [Str "The formula", Space, Math InlineMath "x^2", Space, Str "is simple"]]
+        doc [Para [Str "The", Space, Str "formula", Space, Math InlineMath "x^2", Space, Str "is", Space, Str "simple"]]
 
   , testCase "display math" $
       parseWpHtml "<p>\\[E = mc^2\\]</p>" @?=
@@ -289,7 +289,7 @@ shortcodeTests = testGroup "Shortcodes"
   , testCase "shortcode pair" $
       parseWpHtml "<p>[code]x = 1[/code]</p>" @?=
         doc [Para [ RawInline (Format "wordpress") "[code]"
-                  , Str "x = 1"
+                  , Str "x", Space, Str "=", Space, Str "1"
                   , RawInline (Format "wordpress") "[/code]"
                   ]]
 

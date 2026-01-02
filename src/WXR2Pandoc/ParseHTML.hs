@@ -274,16 +274,22 @@ parseBlocksUntil closeTag = go []
       let (blocks, rest) = parseBlock tokens
       in go (blocks ++ acc) rest
 
--- | Collect text content until closing tag
+-- | Collect text content until closing tag, stripping leading newline
 collectTextUntil :: T.Text -> [Token] -> (T.Text, [Token])
-collectTextUntil closeTag = go []
+collectTextUntil closeTag tokens = go [] (stripLeadingNewline tokens)
   where
+    -- Strip first newline token after open tag (handles <pre>\n case)
+    stripLeadingNewline (TokNewlines _ : rest) = rest
+    stripLeadingNewline (TokTagOpen "code" attrs : TokNewlines _ : rest) =
+      TokTagOpen "code" attrs : rest
+    stripLeadingNewline ts = ts
+
     go acc [] = (T.concat $ reverse acc, [])
     go acc (TokTagClose tag : rest)
       | tag == closeTag = (T.concat $ reverse acc, rest)
     go acc (TokText t : rest) = go (t : acc) rest
     go acc (TokNewlines n : rest) = go (T.replicate n "\n" : acc) rest
-    go acc (TokTagOpen "code" _ : rest) = go acc rest
+    go acc (TokTagOpen "code" _ : rest) = go acc (stripLeadingNewline rest)
     go acc (TokTagClose "code" : rest) = go acc rest
     go acc (_ : rest) = go acc rest
 
@@ -527,7 +533,6 @@ tokenToInline (TokLatexEnv src) = RawInline (Format "tex") src
 mergeInlines :: [Inline] -> [Inline]
 mergeInlines (Str a : Str b : xs) = mergeInlines (Str (a <> b) : xs)
 mergeInlines (Space : Space : xs) = mergeInlines (Space : xs)
-mergeInlines (Str a : Space : Str b : xs) = mergeInlines (Str (a <> " " <> b) : xs)
 mergeInlines (x : xs) = x : mergeInlines xs
 mergeInlines [] = []
 
