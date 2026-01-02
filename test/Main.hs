@@ -202,6 +202,10 @@ blockTests = testGroup "Block elements"
         doc [Figure ("", [], [])
               (Caption Nothing [Plain [Str "Caption"]])
               [Plain [Image ("", [], []) [Str ""] ("img.png", "")]]]
+
+  , testCase "blockquote with newline after tag" $
+      parseWpHtml "<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>Hello</p>\n<!-- /wp:paragraph --></blockquote>" @?=
+        doc [BlockQuote [Para [Str "Hello"]]]
   ]
 
 -- | List tests
@@ -463,6 +467,10 @@ pandocBlockTests = testGroup "Block elements"
   , testCase "definition list" $
       parsePandoc "<dl><dt>Term</dt><dd>Definition</dd></dl>" @?=
         doc [DefinitionList [([Str "Term"], [[Plain [Str "Definition"]]])]]
+
+  , testCase "blockquote with newline after tag" $
+      parsePandoc "<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>Hello</p>\n<!-- /wp:paragraph --></blockquote>" @?=
+        doc [BlockQuote [Para [Str "Hello"]]]
   ]
 
 -- | wpHtmlFilter specific tests

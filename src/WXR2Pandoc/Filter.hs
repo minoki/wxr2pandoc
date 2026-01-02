@@ -186,9 +186,10 @@ processInlineShortcode raw@(RawInline (P.Format "wordpress") tag)
 processInlineShortcode inl = [inl]
 
 stripEmptyPara :: [Block] -> [Block]
-stripEmptyPara (Para [] : xs) = stripEmptyPara xs
-stripEmptyPara (x : xs)       = x : stripEmptyPara xs
-stripEmptyPara []             = []
+stripEmptyPara (Para [] : xs)          = stripEmptyPara xs
+stripEmptyPara (Para [SoftBreak] : xs) = stripEmptyPara xs
+stripEmptyPara (x : xs)                = x : stripEmptyPara xs
+stripEmptyPara []                      = []
 
 wpHtmlFilter :: Pandoc -> Pandoc
 wpHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
