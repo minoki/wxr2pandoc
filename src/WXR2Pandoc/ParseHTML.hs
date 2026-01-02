@@ -199,7 +199,7 @@ parseBlock' implicitParaAsPlain (TokTagOpen "p" _ : rest) =
   let (inlines, rest') = parseInlinesUntil "p" rest
   in ([Para $ mergeInlines inlines], rest')
 parseBlock' implicitParaAsPlain (TokTagOpen "div" attrs : rest) =
-  let (blocks, rest') = parseBlocksUntil False "div" rest
+  let (blocks, rest') = parseBlocksUntil True "div" rest
   in ([Div (toAttr attrs) blocks], rest')
 parseBlock' implicitParaAsPlain (TokTagOpen "ul" _ : rest) =
   let (items, rest') = parseListItems "ul" rest
@@ -464,7 +464,7 @@ parseTableRow attrs = go []
         goCell acc (TokTagClose t : rest)
           | t == tag = (reverse acc, rest)
         goCell acc tokens =
-          let (blocks, rest) = parseBlock' False tokens
+          let (blocks, rest) = parseBlock' True tokens
           in goCell (blocks ++ acc) rest
 
 -- | Parse figure content
@@ -477,7 +477,7 @@ parseFigure = go Nothing []
       let (inlines, rest') = parseInlinesUntil "figcaption" rest
       in go (Just $ mergeInlines inlines) blocks rest'
     go caption blocks tokens =
-      let (blks, rest) = parseBlock' False tokens
+      let (blks, rest) = parseBlock' True tokens
       in go caption (blks ++ blocks) rest
 
     mkCaption Nothing        = Caption Nothing []

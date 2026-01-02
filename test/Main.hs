@@ -193,7 +193,7 @@ blockTests = testGroup "Block elements"
       parseWpHtml "<figure><img src=\"img.png\" alt=\"\"><figcaption>Caption</figcaption></figure>" @?=
         doc [Figure ("", [], [])
               (Caption Nothing [Plain [Str "Caption"]])
-              [Para [Image ("", [], []) [Str ""] ("img.png", "")]]]
+              [Plain [Image ("", [], []) [Str ""] ("img.png", "")]]]
   ]
 
 -- | List tests
@@ -233,8 +233,8 @@ tableTests = testGroup "Tables"
             (TableHead ("", [], []) [])
             [TableBody ("", [], []) (RowHeadColumns 0) []
               [ Row ("", [], [])
-                  [ Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 1) [Para [Str "A"]]
-                  , Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 1) [Para [Str "B"]]
+                  [ Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 1) [Plain [Str "A"]]
+                  , Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 1) [Plain [Str "B"]]
                   ]
               ]]
             (TableFoot ("", [], []) [])
@@ -247,10 +247,10 @@ tableTests = testGroup "Tables"
             [(AlignDefault, ColWidthDefault)]
             (TableHead ("", [], [])
               [Row ("", [], [])
-                [Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 1) [Para [Str "Header"]]]])
+                [Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 1) [Plain [Str "Header"]]]])
             [TableBody ("", [], []) (RowHeadColumns 0) []
               [Row ("", [], [])
-                [Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 1) [Para [Str "Data"]]]]]
+                [Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 1) [Plain [Str "Data"]]]]]
             (TableFoot ("", [], []) [])
       in parseWpHtml "<table><thead><tr><th>Header</th></tr></thead><tbody><tr><td>Data</td></tr></tbody></table>" @?= doc [expected]
   ]
