@@ -388,6 +388,10 @@ shortcodeTests = testGroup "Shortcodes"
   , testCase "sourcecode with multiple blank lines" $
       parseWpHtml "<p>[sourcecode lang=\"python\"]\nline1\n\n\nline2\n[/sourcecode]</p>" @?=
         doc [CodeBlock ("", ["python"], []) "line1\n\n\nline2\n"]
+
+  , testCase "shortcode inside <a>" $
+      parseWpHtml "<p><a href=\"http://www.example.com/\">Hello [TeX-logo]</a></p>" @?=
+        doc [Para [Link ("", [], []) [Str "Hello", Space, Span ("", ["TeX-logo"], []) [Str "TeX"]] ("http://www.example.com/", "")]]
   ]
 
 --------------------------------------------------------------------------------
@@ -552,4 +556,8 @@ pandocShortcodeTests = testGroup "Shortcodes"
   , testCase "shortcode with multiple hyphens" $
       parsePandoc "<p>[my-custom-shortcode]</p>" @?=
         doc [Para [RawInline (Format "wordpress") "[my-custom-shortcode]"]]
+
+  , testCase "shortcode inside <a>" $
+      parsePandoc "<p><a href=\"http://www.example.com/\">Hello [TeX-logo]</a></p>" @?=
+        doc [Para [Link ("", [], []) [Str "Hello", Space, Span ("", ["TeX-logo"], []) [Str "TeX"]] ("http://www.example.com/", "")]]
   ]

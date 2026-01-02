@@ -21,6 +21,7 @@ import           Text.Pandoc.Options (ReaderOptions (..), WriterOptions (..),
                                       def)
 import           Text.Pandoc.Readers.HTML (readHtml)
 import           Text.Pandoc.Templates
+import qualified Text.Pandoc.Walk as P
 import           Text.Pandoc.Writers (writeJSON)
 import           Text.Pandoc.Writers.Markdown (writeCommonMark)
 -- import           Text.Pandoc.Writers.XML (writeXML) -- pandoc >= 3.8
@@ -62,7 +63,7 @@ writeCommonMarkFile path doc = do
     let tpl = case tplResult of
                 Left e  -> error e
                 Right t -> t
-    writeCommonMark (writerOptions { writerTemplate = Just tpl }) doc
+    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ P.walk unparseShortcode doc
   BS.writeFile path $ T.encodeUtf8 content
 
 writePandocJSONFile :: FilePath -> Pandoc -> IO ()

@@ -129,8 +129,8 @@ collectCaption = go [] []
     go content caption (x@P.Space : xs) = go content (x : caption) xs
     go content caption (x : xs) = go (x : content) caption xs
 
-processWpShortcode :: [Block] -> [Block]
-processWpShortcode (Para inlines : blocks) = goInlines [] inlines blocks
+processBlockShortcode :: [Block] -> [Block]
+processBlockShortcode (Para inlines : blocks) = goInlines [] inlines blocks
   where
     takeWpBlock tag = go []
       where go revAcc (raw@(RawInline (P.Format "wordpress") tag') : xs)
@@ -139,13 +139,6 @@ processWpShortcode (Para inlines : blocks) = goInlines [] inlines blocks
             go revAcc [] = ([], reverse revAcc) -- unmatched
     goInlines revAcc (raw@(RawInline (P.Format "wordpress") tag) : xs) blocks
       = case testWpShortcode tag of
-          Just ("mathjax", _) -> goInlines revAcc xs blocks -- ignore
-          Just ("toc", _) -> goInlines (RawInline (P.Format "html") "<!--toc-->" : revAcc) xs blocks
-          Just ("TeX-logo", _) -> goInlines (Span ("", ["TeX-logo"], []) [Str "TeX"] : revAcc) xs blocks
-          Just ("LaTeX-logo", _) -> goInlines (Span ("", ["LaTeX-logo"], []) [Str "LaTeX"] : revAcc) xs blocks
-          Just ("XeTeX-logo", _) -> goInlines (Span ("", ["XeTeX-logo"], []) [Str "XeTeX"] : revAcc) xs blocks
-          Just ("XeLaTeX-logo", _) -> goInlines (Span ("", ["XeLaTeX-logo"], []) [Str "XeLaTeX"] : revAcc) xs blocks
-          Just ("xypic-logo", _) -> goInlines (Span ("", ["xypic-logo"], []) [Str "Xy-pic"] : revAcc) xs blocks
           Just ("caption", attrs) -> case takeWpBlock "caption" xs of
             (content, rest) ->
               let attrs' = case Data.List.lookup "align" attrs of
@@ -166,18 +159,31 @@ processWpShortcode (Para inlines : blocks) = goInlines [] inlines blocks
               in Para (reverse revAcc) : goSourcecode attr [] xs blocks
           _ -> goInlines (raw : revAcc) xs blocks
     goInlines revAcc (x : xs) blocks = goInlines (x : revAcc) xs blocks
-    goInlines revAcc [] blocks = Para (reverse revAcc) : processWpShortcode blocks
+    goInlines revAcc [] blocks = Para (reverse revAcc) : processBlockShortcode blocks
     goSourcecode attr revAcc (RawInline (P.Format "wordpress") tag : xs) blocks
-      | tag == "[/code]" || tag == "[/sourcecode]" = CodeBlock attr (T.concat (reverse revAcc)) : processWpShortcode (Para xs : blocks)
+      | tag == "[/code]" || tag == "[/sourcecode]" = CodeBlock attr (T.concat (reverse revAcc)) : processBlockShortcode (Para xs : blocks)
     goSourcecode attr revAcc (Str s : xs) blocks = goSourcecode attr (s : revAcc) xs blocks
     goSourcecode attr revAcc (P.Space : xs) blocks = goSourcecode attr (" " : revAcc) xs blocks
     goSourcecode attr revAcc (LineBreak : xs) blocks = goSourcecode attr ("\n" : revAcc) xs blocks
-    goSourcecode attr revAcc xs@(_ : _) blocks = CodeBlock attr (T.concat (reverse revAcc)) : processWpShortcode (Para xs : blocks)
+    goSourcecode attr revAcc xs@(_ : _) blocks = CodeBlock attr (T.concat (reverse revAcc)) : processBlockShortcode (Para xs : blocks)
     goSourcecode attr revAcc@[] [] (Para xs : blocks) = goSourcecode attr revAcc xs blocks -- Immediately after [sourcecode]
     goSourcecode attr revAcc [] (Para xs : blocks) = goSourcecode attr ("\n" : revAcc) xs blocks
-    goSourcecode attr revAcc [] blocks = CodeBlock attr (T.concat (reverse revAcc)) : processWpShortcode blocks
-processWpShortcode (block : blocks) = block : processWpShortcode blocks
-processWpShortcode [] = []
+    goSourcecode attr revAcc [] blocks = CodeBlock attr (T.concat (reverse revAcc)) : processBlockShortcode blocks
+processBlockShortcode (block : blocks) = block : processBlockShortcode blocks
+processBlockShortcode [] = []
+
+processInlineShortcode :: Inline -> [Inline]
+processInlineShortcode raw@(RawInline (P.Format "wordpress") tag)
+  = case testWpShortcode tag of
+      Just ("mathjax", _) -> [] -- ignore
+      Just ("toc", _) -> [RawInline (P.Format "html") "<!--toc-->"]
+      Just ("TeX-logo", _) -> [Span ("", ["TeX-logo"], []) [Str "TeX"]]
+      Just ("LaTeX-logo", _) -> [Span ("", ["LaTeX-logo"], []) [Str "LaTeX"]]
+      Just ("XeTeX-logo", _) -> [Span ("", ["XeTeX-logo"], []) [Str "XeTeX"]]
+      Just ("XeLaTeX-logo", _) -> [Span ("", ["XeLaTeX-logo"], []) [Str "XeLaTeX"]]
+      Just ("xypic-logo", _) -> [Span ("", ["xypic-logo"], []) [Str "Xy-pic"]]
+      _ -> [raw]
+processInlineShortcode inl = [inl]
 
 stripEmptyPara :: [Block] -> [Block]
 stripEmptyPara (Para [] : xs) = stripEmptyPara xs
@@ -185,7 +191,11 @@ stripEmptyPara (x : xs)       = x : stripEmptyPara xs
 stripEmptyPara []             = []
 
 wpHtmlFilter :: Pandoc -> Pandoc
-wpHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk processWpShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
+wpHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
 
 wpBasicHtmlFilter :: Pandoc -> Pandoc
-wpBasicHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk processWpShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass
+wpBasicHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass
+
+unparseShortcode :: Inline -> Inline
+unparseShortcode (RawInline (P.Format "wordpress") content) = Str content
+unparseShortcode inl = inl
