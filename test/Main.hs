@@ -214,6 +214,10 @@ blockTests = testGroup "Block elements"
   , testCase "blockquote with newline after tag" $
       parseWpHtml "<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>Hello</p>\n<!-- /wp:paragraph --></blockquote>" @?=
         doc [BlockQuote [Para [Str "Hello"]]]
+
+  , testCase "blockquote with custom class" $
+      parseWpHtml "<blockquote class=\"twitter-tweet\"><p>Hello</p></blockquote>" @?=
+        doc [RawBlock (Format "html") "<blockquote class=\"twitter-tweet\">", Para [Str "Hello"], RawBlock (Format "html") "</blockquote>"]
   ]
 
 -- | List tests
@@ -486,6 +490,10 @@ pandocBlockTests = testGroup "Block elements"
 
   , testCase "blockquote with newline after tag" $
       parsePandoc "<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>Hello</p>\n<!-- /wp:paragraph --></blockquote>" @?=
+        doc [BlockQuote [Para [Str "Hello"]]]
+
+  , testCase "blockquote with custom class" $
+      parsePandoc "<blockquote class=\"twitter-tweet\"><p>Hello</p></blockquote>" @?=
         doc [BlockQuote [Para [Str "Hello"]]]
   ]
 

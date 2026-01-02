@@ -212,9 +212,20 @@ parseBlock' implicitParaAsPlain (TokTagOpen "ol" attrs : rest) =
 parseBlock' implicitParaAsPlain (TokTagOpen "pre" attrs : rest) =
   let (content, rest') = collectTextUntil "pre" rest
   in ([CodeBlock (toAttr attrs) content], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "blockquote" _ : rest) =
+parseBlock' implicitParaAsPlain (TokTagOpen "blockquote" attrs : rest) =
   let (blocks, rest') = parseBlocksUntil False "blockquote" rest
-  in ([BlockQuote blocks], rest')
+      classes = T.words (fromMaybe "" $ lookup "class" attrs)
+      trivial = case classes of
+                  [] -> True
+                  ["wp-block-quote"] -> True
+                  _ -> False
+  in if trivial
+     then ([BlockQuote blocks], rest')
+     else
+       let attrStr = T.concat [" " <> n <> "=\"" <> escapeHTML v <> "\"" | (n, v) <- attrs]
+           opening = RawBlock (Format "html") $ "<blockquote" <> attrStr <> ">"
+           closing = RawBlock (Format "html") "</blockquote>"
+       in (opening : blocks ++ [closing], rest')
 parseBlock' implicitParaAsPlain (TokTagOpen tag attrs : rest)
   | Just level <- headerLevel tag =
       let (inlines, rest') = parseInlinesUntil tag rest
