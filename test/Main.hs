@@ -81,6 +81,14 @@ basicTests = testGroup "Basic"
   , testCase "double newline creates paragraph break" $
       parseWpHtml "First\n\nSecond" @?=
         doc [Para [Str "First"], Para [Str "Second"]]
+
+  , testCase "HTML comment is preserved as RawInline" $
+      parseWpHtml "<p>Hello <!-- comment --> world</p>" @?=
+        doc [Para [Str "Hello", Space, RawInline (Format "html") "<!-- comment -->", Space, Str "world"]]
+
+  , testCase "HTML comment only" $
+      parseWpHtml "<!-- just a comment -->" @?=
+        doc [Para [RawInline (Format "html") "<!-- just a comment -->"]]
   ]
 
 -- | Inline element tests

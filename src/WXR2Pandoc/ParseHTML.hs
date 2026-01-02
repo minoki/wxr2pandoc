@@ -35,6 +35,7 @@ data Token
   | TokMathInline T.Text                      -- ^ Inline math \(...\)
   | TokMathDisplay T.Text                     -- ^ Display math \[...\]
   | TokLatexEnv T.Text                        -- ^ LaTeX environment \begin{...}...\end{...}
+  | TokComment T.Text                         -- ^ HTML comment <!-- ... -->
   deriving (Show, Eq)
 
 -- | Parser for shortcode attributes (internal use)
@@ -142,7 +143,7 @@ tagToTokens (TagClose name)
   | T.null name = []
   | otherwise = [TokTagClose (T.toLower name)]
 tagToTokens (TagText txt) = parseTextTokens txt
-tagToTokens (TagComment _) = []
+tagToTokens (TagComment c) = [TokComment c]
 tagToTokens (TagWarning _) = []
 tagToTokens (TagPosition _ _) = []
 
@@ -596,6 +597,7 @@ tokenToInline (TokNewlines _) = SoftBreak
 tokenToInline (TokMathInline content) = Math InlineMath content
 tokenToInline (TokMathDisplay content) = Math DisplayMath content
 tokenToInline (TokLatexEnv src) = RawInline (Format "tex") src
+tokenToInline (TokComment c) = RawInline (Format "html") $ "<!--" <> c <> "-->"
 
 -- | Merge consecutive Str elements and normalize Space
 mergeInlines :: [Inline] -> [Inline]
