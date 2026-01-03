@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 module WXR2Pandoc.ParseHTML
   ( parseWpHtml
@@ -31,7 +32,7 @@ data Token
   | TokTagSelfClose T.Text [(T.Text, T.Text)] -- ^ Self-closing tag <name />
   | TokShortcode T.Text T.Text                -- ^ WordPress shortcode: name, raw string [name attr="val"]
   | TokShortcodeClose T.Text T.Text           -- ^ Closing shortcode: name, raw string [/name]
-  | TokNewlines Int                           -- ^ Consecutive newlines (2+ means paragraph break)
+  | TokNewlines !Int                           -- ^ Consecutive newlines (2+ means paragraph break)
   | TokMathInline T.Text                      -- ^ Inline math \(...\)
   | TokMathDisplay T.Text                     -- ^ Display math \[...\]
   | TokLatexEnv T.Text                        -- ^ LaTeX environment \begin{...}...\end{...}
@@ -104,52 +105,62 @@ latexEnvP = do
     pure ()
   pure $ TokLatexEnv src
 
--- | Parser for consecutive newlines
-newlinesP :: A.Parser Token
-newlinesP = do
-  nl <- A.takeWhile1 (== '\n')
-  pure $ TokNewlines (T.length nl)
+-- | Parser for newline
+newlineP :: A.Parser Token
+newlineP = do
+  A.endOfLine
+  pure $ TokNewlines 1
 
--- | Parser for separating shortcodes, math, and newlines from text
+-- | Parser for separating shortcodes, math, and newline from text
 textTokenP :: A.Parser Token
-textTokenP = shortcodeP <|> latexEnvP <|> mathInlineP <|> mathDisplayP <|> newlinesP <|> plainTextP <|> singleCharP
+textTokenP = shortcodeP <|> latexEnvP <|> mathInlineP <|> mathDisplayP <|> newlineP <|> singleCharP
   where
-    plainTextP = TokText <$> A.takeWhile1 (\c -> c /= '[' && c /= '\n' && c /= '\\')
     -- Single character fallback when parsing fails
     singleCharP = TokText . T.singleton <$> A.anyChar
 
 -- | Split text into tokens
-parseTextTokens :: T.Text -> [Token]
-parseTextTokens txt
-  | T.null txt = []
-  | otherwise = case A.parse (many textTokenP) txt of
-      A.Done rest tokens
-        | T.null rest -> tokens
-        | otherwise -> tokens ++ [TokText rest]
-      A.Partial cont -> case cont "" of
-        A.Done rest tokens
-          | T.null rest -> tokens
-          | otherwise -> tokens ++ [TokText rest]
-        A.Fail _ _ _ -> [TokText txt]
-        A.Partial _ -> [TokText txt]
-      A.Fail _ _ _ -> [TokText txt]
+parseTextTokens :: T.Text -> [Tag T.Text] -> [Token]
+parseTextTokens txt restTags = case T.uncons txt of
+  Nothing -> tagsToTokens restTags
+  Just (c, txt') ->
+    let onFail = TokText (T.singleton c) : parseTextTokens txt' restTags
+        more cont restTags =
+          let (nextText, restTags') = case restTags of
+                TagOpen "br" _ : restTags' -> ("\n", restTags')
+                TagText txt' : restTags' -> (txt', restTags')
+                _ -> ("", restTags)
+          in case cont nextText of
+               A.Done rest token -> token : parseTextTokens rest restTags'
+               A.Partial cont -> more cont restTags'
+               A.Fail _ _ _ -> onFail
+    in case A.parse textTokenP txt of
+         A.Done rest token -> token : parseTextTokens rest restTags
+         A.Partial cont -> more cont restTags
+         A.Fail _ _ _ -> onFail
 
--- | Convert HTML tag to tokens
-tagToTokens :: Tag T.Text -> [Token]
-tagToTokens (TagOpen name attrs)
-  | T.null name = []
-  | otherwise = [TokTagOpen (T.toLower name) attrs]
-tagToTokens (TagClose name)
-  | T.null name = []
-  | otherwise = [TokTagClose (T.toLower name)]
-tagToTokens (TagText txt) = parseTextTokens txt
-tagToTokens (TagComment c) = [TokComment c]
-tagToTokens (TagWarning _) = []
-tagToTokens (TagPosition _ _) = []
+-- | Convert HTML tags to tokens
+tagsToTokens :: [Tag T.Text] -> [Token]
+tagsToTokens (TagOpen name attrs : rest) = TokTagOpen (T.toLower name) attrs : tagsToTokens rest
+tagsToTokens (TagClose name : rest) = TokTagClose (T.toLower name) : tagsToTokens rest
+tagsToTokens (TagText txt : rest) = parseTextTokens txt rest
+tagsToTokens (TagComment c : rest) = TokComment c : tagsToTokens rest
+tagsToTokens (TagWarning _ : rest) = tagsToTokens rest
+tagsToTokens (TagPosition _ _ : rest) = tagsToTokens rest
+tagsToTokens [] = []
+
+mergeTextTokens :: [Token] -> [Token]
+mergeTextTokens (TokText t1 : TokText t2 : rest) = go [t2, t1] rest
+  where go acc (TokText t : rest) = go (t : acc) rest
+        go acc rest = TokText (T.concat (reverse acc)) : mergeTextTokens rest
+mergeTextTokens (TokNewlines i1 : TokNewlines i2 : rest) = go (i1 + i2) rest
+  where go !n (TokNewlines i : rest) = go (n + i) rest
+        go !n rest = TokNewlines n : mergeTextTokens rest
+mergeTextTokens (t : rest) = t : mergeTextTokens rest
+mergeTextTokens [] = []
 
 -- | Convert WordPress HTML to token list
 tokenize :: T.Text -> [Token]
-tokenize = concatMap tagToTokens . parseTags
+tokenize = mergeTextTokens . tagsToTokens . parseTags
 
 -- | Empty attribute
 nullAttr :: Attr
@@ -620,7 +631,6 @@ mergeInlines []                   = []
 -- | Convert WordPress HTML string to Pandoc AST
 parseWpHtml :: T.Text -> Pandoc
 parseWpHtml html =
-  let html' = T.filter (/= '\r') html  -- Remove CR from CRLF
-      tokens = tokenize html'
+  let tokens = tokenize html
       blocks = parseBlocks tokens
   in wpBasicHtmlFilter $ Pandoc mempty blocks

@@ -293,6 +293,10 @@ mathTests = testGroup "Math"
   , testCase "LaTeX environment" $
       parseWpHtml "<p>\\begin{align}x = 1\\end{align}</p>" @?=
         doc [Para [RawInline (Format "tex") "\\begin{align}x = 1\\end{align}"]]
+
+  , testCase "LaTeX environment with <br>" $
+      parseWpHtml "<p>\\begin{align*}x &amp;= 1,\\\\<br>y &amp;= 2,\\\\<br>z &amp;= 3 \\end{align*}</p>" @?=
+        doc [Para [RawInline (Format "tex") "\\begin{align*}x &= 1,\\\\\ny &= 2,\\\\\nz &= 3 \\end{align*}"]]
   ]
 
 -- | WordPress shortcode tests for parseWpHtml
@@ -519,6 +523,10 @@ pandocFilterTests = testGroup "wpHtmlFilter"
   , testCase "parses LaTeX environment" $
       parsePandoc "<p>\\begin{align}x = 1\\end{align}</p>" @?=
         doc [Para [RawInline (Format "tex") "\\begin{align}x = 1\\end{align}"]]
+
+  , testCase "LaTeX environment with <br>" $
+      parsePandoc "<p>\\begin{align*}x &amp;= 1,\\\\<br>y &amp;= 2,\\\\<br>z &amp;= 3 \\end{align*}</p>" @?=
+        doc [Para [RawInline (Format "tex") "\\begin{align*}x &= 1,\\\\\ny &= 2,\\\\\nz &= 3 \\end{align*}"]]
   ]
 
 -- | WordPress shortcode tests
