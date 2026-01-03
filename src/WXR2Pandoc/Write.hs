@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
-module WXR2Pandoc.ConvertHTML
+module WXR2Pandoc.Write
   ( HTMLReader(..)
   , parseWpHtmlWith
   , parsePostWith

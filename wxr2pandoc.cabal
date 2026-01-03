@@ -20,7 +20,7 @@ library
     import:           warnings
     exposed-modules:  WXR2Pandoc.WXR
                       WXR2Pandoc.Filter
-                      WXR2Pandoc.ConvertHTML
+                      WXR2Pandoc.Write
                       WXR2Pandoc.ParseHTML
     -- other-modules:
     -- other-extensions:

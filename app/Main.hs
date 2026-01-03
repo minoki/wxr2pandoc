@@ -9,7 +9,7 @@ import qualified Options.Applicative as OA
 import           System.Directory
 import           System.IO
 import qualified Text.Pandoc.Error as P
-import           WXR2Pandoc.ConvertHTML
+import           WXR2Pandoc.Write
 import           WXR2Pandoc.WXR (Item (..), Post (..), processFile)
 
 data AppOptions = AppOptions
