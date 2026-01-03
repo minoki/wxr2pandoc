@@ -77,7 +77,7 @@ mergeStr []                   = []
 -- (Str "...[caption") Space (Str "...]...")
 -- (Str "...\\begin{align*}...") LineBreak (Str "...\\end{align*}...")
 parseStr :: [Inline] -> [Inline]
-parseStr (Str s : xs) = parse s xs
+parseStr (Str s0 : xs0) = parse s0 xs0
   where
     parse "" xs = parseStr xs
     parse s xs  = go (A.parse strElemP s) xs
@@ -86,7 +86,7 @@ parseStr (Str s : xs) = parse s xs
     go (A.Partial more) (P.Space : xs)         = go (more " ") xs
     go (A.Partial more) (LineBreak : xs)       = go (more "\n") xs
     go (A.Partial more) xs                     = go (more "") xs
-    go (A.Fail notConsumed context message) xs = error $ "fail: " ++ message
+    go (A.Fail _notConsumed _context message) _ = error $ "fail: " ++ message
 parseStr (inl : xs) = inl : parseStr xs
 parseStr [] = []
 
@@ -130,10 +130,10 @@ collectCaption = go [] []
     go content caption (x : xs) = go (x : content) caption xs
 
 processBlockShortcode :: [Block] -> [Block]
-processBlockShortcode (Para inlines : blocks) = goInlines [] inlines blocks
+processBlockShortcode (Para inlines : blocks0) = goInlines [] inlines blocks0
   where
     takeWpBlock tag = go []
-      where go revAcc (raw@(RawInline (P.Format "wordpress") tag') : xs)
+      where go revAcc (RawInline (P.Format "wordpress") tag' : xs)
               | tag' == "[/" <> tag <> "]" = (reverse revAcc, xs)
             go revAcc (x : xs) = go (x : revAcc) xs
             go revAcc [] = ([], reverse revAcc) -- unmatched

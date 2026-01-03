@@ -49,8 +49,7 @@ processFile :: FilePath -> IO [Item]
 processFile filename = do
   doc <- XC.readFile XC.def filename
   let doc_cursor = XC.fromDocument doc
-  let [channel] = doc_cursor XC.$| XC.child >=> XC.element (XC.Name "channel" Nothing Nothing)
-      items = channel XC.$| XC.child >=> XC.element (XC.Name "item" Nothing Nothing)
+  let items = doc_cursor XC.$| XC.child >=> XC.element (XC.Name "channel" Nothing Nothing) >=> XC.child >=> XC.element (XC.Name "item" Nothing Nothing)
   {-
   let idToLink :: Map.Map Int T.Text
       idToLink = Map.fromList $ flip concatMap items $ \item -> do

@@ -120,22 +120,22 @@ textTokenP = shortcodeP <|> latexEnvP <|> mathInlineP <|> mathDisplayP <|> newli
 
 -- | Split text into tokens
 parseTextTokens :: T.Text -> [Tag T.Text] -> [Token]
-parseTextTokens txt restTags = case T.uncons txt of
-  Nothing -> tagsToTokens restTags
+parseTextTokens txt restTags0 = case T.uncons txt of
+  Nothing -> tagsToTokens restTags0
   Just (c, txt') ->
-    let onFail = TokText (T.singleton c) : parseTextTokens txt' restTags
+    let onFail = TokText (T.singleton c) : parseTextTokens txt' restTags0
         more cont restTags =
           let (nextText, restTags') = case restTags of
-                TagOpen "br" _ : restTags' -> ("\n", restTags')
-                TagText txt' : restTags' -> (txt', restTags')
+                TagOpen "br" _ : restTags'' -> ("\n", restTags'')
+                TagText txt'' : restTags'' -> (txt'', restTags'')
                 _ -> ("", restTags)
           in case cont nextText of
                A.Done rest token -> token : parseTextTokens rest restTags'
-               A.Partial cont -> more cont restTags'
+               A.Partial cont' -> more cont' restTags'
                A.Fail _ _ _ -> onFail
     in case A.parse textTokenP txt of
-         A.Done rest token -> token : parseTextTokens rest restTags
-         A.Partial cont -> more cont restTags
+         A.Done rest token -> token : parseTextTokens rest restTags0
+         A.Partial cont -> more cont restTags0
          A.Fail _ _ _ -> onFail
 
 -- | Convert HTML tags to tokens
@@ -149,10 +149,10 @@ tagsToTokens (TagPosition _ _ : rest) = tagsToTokens rest
 tagsToTokens [] = []
 
 mergeTextTokens :: [Token] -> [Token]
-mergeTextTokens (TokText t1 : TokText t2 : rest) = go [t2, t1] rest
+mergeTextTokens (TokText t1 : TokText t2 : rest0) = go [t2, t1] rest0
   where go acc (TokText t : rest) = go (t : acc) rest
         go acc rest = TokText (T.concat (reverse acc)) : mergeTextTokens rest
-mergeTextTokens (TokNewlines i1 : TokNewlines i2 : rest) = go (i1 + i2) rest
+mergeTextTokens (TokNewlines i1 : TokNewlines i2 : rest0) = go (i1 + i2) rest0
   where go !n (TokNewlines i : rest) = go (n + i) rest
         go !n rest = TokNewlines n : mergeTextTokens rest
 mergeTextTokens (t : rest) = t : mergeTextTokens rest
@@ -207,23 +207,23 @@ parseBlocks = parseBlocks' False
 --   The Bool argument indicates whether an implicit Para should be converted to Plain.
 parseBlock' :: Bool -> [Token] -> ([Block], [Token])
 parseBlock' _ [] = ([], [])
-parseBlock' implicitParaAsPlain (TokTagOpen "p" _ : rest) =
+parseBlock' _ (TokTagOpen "p" _ : rest) =
   let (inlines, rest') = parseInlinesUntil "p" rest
   in ([Para $ mergeInlines inlines], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "div" attrs : rest) =
+parseBlock' _ (TokTagOpen "div" attrs : rest) =
   let (blocks, rest') = parseBlocksUntil True "div" rest
   in ([Div (toAttr attrs) blocks], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "ul" _ : rest) =
+parseBlock' _ (TokTagOpen "ul" _ : rest) =
   let (items, rest') = parseListItems "ul" rest
   in ([BulletList items], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "ol" attrs : rest) =
+parseBlock' _ (TokTagOpen "ol" attrs : rest) =
   let (items, rest') = parseListItems "ol" rest
       startNum = maybe 1 fst $ lookup "start" attrs >>= either (const Nothing) Just . T.decimal
   in ([OrderedList (startNum, DefaultStyle, DefaultDelim) items], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "pre" attrs : rest) =
+parseBlock' _ (TokTagOpen "pre" attrs : rest) =
   let (content, rest') = collectTextUntil "pre" rest
   in ([CodeBlock (toAttr attrs) content], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "blockquote" attrs : rest) =
+parseBlock' _ (TokTagOpen "blockquote" attrs : rest) =
   let (blocks, rest') = parseBlocksUntil False "blockquote" rest
       classes = T.words (fromMaybe "" $ lookup "class" attrs)
       trivial = case classes of
@@ -237,26 +237,26 @@ parseBlock' implicitParaAsPlain (TokTagOpen "blockquote" attrs : rest) =
            opening = RawBlock (Format "html") $ "<blockquote" <> attrStr <> ">"
            closing = RawBlock (Format "html") "</blockquote>"
        in (opening : blocks ++ [closing], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen tag attrs : rest)
+parseBlock' _ (TokTagOpen tag attrs : rest)
   | Just level <- headerLevel tag =
       let (inlines, rest') = parseInlinesUntil tag rest
       in ([Header level (toAttr attrs) $ mergeInlines inlines], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "dl" _ : rest) =
+parseBlock' _ (TokTagOpen "dl" _ : rest) =
   let (items, rest') = parseDefList rest
   in ([DefinitionList items], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "hr" _ : rest) = ([HorizontalRule], rest)
-parseBlock' implicitParaAsPlain (TokTagClose "hr" : rest) = ([], rest)
-parseBlock' implicitParaAsPlain (TokTagOpen "table" attrs : rest) =
+parseBlock' _ (TokTagOpen "hr" _ : rest) = ([HorizontalRule], rest)
+parseBlock' _ (TokTagClose "hr" : rest) = ([], rest)
+parseBlock' _ (TokTagOpen "table" attrs : rest) =
   let (table, rest') = parseTable attrs rest
   in ([table], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "figure" attrs : rest) =
+parseBlock' _ (TokTagOpen "figure" attrs : rest) =
   let (caption, blocks, rest') = parseFigure rest
   in ([Figure (toAttr attrs) caption blocks], rest')
-parseBlock' implicitParaAsPlain (TokTagOpen "br" _ : rest) = ([], rest)
-parseBlock' implicitParaAsPlain (TokTagClose "br" : rest) = ([], rest)
-parseBlock' implicitParaAsPlain (TokTagClose "img" : rest) = ([], rest)  -- img is self-closing
+parseBlock' _ (TokTagOpen "br" _ : rest) = ([], rest)
+parseBlock' _ (TokTagClose "br" : rest) = ([], rest)
+parseBlock' _ (TokTagClose "img" : rest) = ([], rest)  -- img is self-closing
 -- Skip unknown block close tags
-parseBlock' implicitParaAsPlain (TokTagClose tag : rest)
+parseBlock' _ (TokTagClose tag : rest)
   | isBlockTag tag = ([], rest)
 -- Collect inline content into a Para or Plain
 parseBlock' implicitParaAsPlain (tok : rest) =
@@ -265,10 +265,6 @@ parseBlock' implicitParaAsPlain (tok : rest) =
      then ([], rest)  -- Skip one token to ensure progress
      else let constructor = if implicitParaAsPlain then Plain else Para
           in ([constructor $ mergeInlines inlines], rest')
-
--- | Public wrapper for parseBlock' with default behavior (implicit Para is Para)
-parseBlock :: [Token] -> ([Block], [Token])
-parseBlock = parseBlock' False
 
 -- | Collect inline tokens until we hit a block tag or run out
 collectInlines :: [Token] -> ([Inline], [Token])
@@ -321,7 +317,7 @@ parseInlinesUntil closeTag = go []
 --   Allows blank lines (multiple consecutive newlines) inside code blocks.
 --   Stops at block tags (like </p>) or the matching closing shortcode.
 collectCodeShortcode :: T.Text -> [Token] -> ([Inline], [Token])
-collectCodeShortcode openName tokens = go [] (stripLeadingNewline tokens)
+collectCodeShortcode openName tokens0 = go [] (stripLeadingNewline tokens0)
   where
     -- Strip first newline token after open shortcode
     stripLeadingNewline (TokNewlines _ : rest) = rest
@@ -358,7 +354,7 @@ collectTextUntil closeTag tokens = go [] (stripLeadingNewline tokens)
   where
     -- Strip first newline token after open tag (handles <pre>\n case)
     stripLeadingNewline (TokNewlines _ : rest) = rest
-    stripLeadingNewline (tag@(TokTagOpen "code" attrs) : TokNewlines _ : rest) =
+    stripLeadingNewline (tag@(TokTagOpen "code" _attrs) : TokNewlines _ : rest) =
       tag : rest
     stripLeadingNewline ts = ts
 
