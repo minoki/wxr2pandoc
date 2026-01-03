@@ -35,7 +35,8 @@ library
                       containers >=0.7 && <0.9,
                       attoparsec ^>=0.14.4,
                       tagsoup ^>=0.14.8,
-                      bytestring ^>=0.12.2.0
+                      bytestring ^>=0.12.2.0,
+                      network-uri >=2.6.4.2 && <2.8
     hs-source-dirs:   src
     default-language: GHC2021
 

@@ -44,7 +44,7 @@ main = do
   items <- processFile inputXml
   forM_ items $ \item -> case item of
     ItemPost p       -> do
-      case parsePostWith htmlReader p of
+      case parsePostWith htmlReader baseUrl p of
         Left e -> hPutStrLn stderr $ "Error: " ++ T.unpack (P.renderError e) ++ " while reading " ++ T.unpack (postName p)
         Right doc -> do
           createDirectoryIfMissing True outputDir

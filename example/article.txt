@@ -1,0 +1,22 @@
+<h1>すごい記事</h1>
+
+[mathjax]こんにちは。これはすごい記事です。
+
+Hello. This is a great article.
+
+[TeX-logo]
+
+\(20^{2026}\), \[x^n+y^n=z^n\]
+
+何らかの数式：\begin{align*}
+a&=b+c, \\
+d&=e\times f
+\end{align*}
+
+Some equations: \begin{align*}<br>a&=b+c, \\<br>d&=e\times f<br>\end{align*}
+
+[code lang="js"]
+function f(x, y, z) {
+    return x * y + z;
+}
+[/code]
