@@ -20,30 +20,42 @@ data PostType = TypePost
               -- attachment?
               deriving (Eq, Show)
 
-data Post = Post { postType       :: PostType
-                 , postTitle      :: T.Text
-                 , postLink       :: T.Text
-                 , postPubDate    :: Maybe UTCTime
-                 , postCreator    :: T.Text
-                 , postContent    :: T.Text
-                 , postId         :: Int
-                 , postDate       :: Maybe LocalTime
-                 , postDateGmt    :: Maybe LocalTime
-                 , postName       :: T.Text
-                 , postStatus     :: T.Text -- publish, draft, inherit
-                 , postCategories :: [T.Text]
-                 , postTags       :: [T.Text]
+data Post = Post { postType         :: PostType
+                 , postTitle        :: T.Text
+                 , postLink         :: T.Text
+                 , postPubDate      :: Maybe UTCTime
+                 , postCreator      :: T.Text
+                 , postContent      :: T.Text
+                 , postId           :: Int
+                 , postDate         :: Maybe ZonedTime
+                 , postModifiedDate :: Maybe ZonedTime
+                 , postName         :: T.Text
+                 , postStatus       :: T.Text -- publish, draft, inherit
+                 , postCategories   :: [T.Text]
+                 , postTags         :: [T.Text]
                  }
-          deriving (Eq, Show)
+          deriving (Show)
 
 data Item = ItemPost Post
           | ItemAttachment { attachmentUrl :: T.Text }
-          deriving (Eq, Show)
+          deriving (Show)
 
 namespace_dc, namespace_wp, namespace_content :: Maybe T.Text
 namespace_dc = Just "http://purl.org/dc/elements/1.1/"
 namespace_wp = Just "http://wordpress.org/export/1.2/"
 namespace_content = Just "http://purl.org/rss/1.0/modules/content/"
+
+-- | Compute ZonedTime from local time and GMT time.
+-- The timezone offset is calculated from the difference between local and GMT.
+computeZonedTime :: Maybe LocalTime -> Maybe LocalTime -> Maybe ZonedTime
+computeZonedTime (Just local) (Just gmt) =
+  let diffSeconds = diffLocalTime local gmt
+      diffMinutes = round (diffSeconds / 60)
+      tz = minutesToTimeZone diffMinutes
+  in Just $ ZonedTime local tz
+computeZonedTime (Just local) Nothing =
+  Just $ ZonedTime local utc
+computeZonedTime Nothing _ = Nothing
 
 processFile :: FilePath -> IO [Item]
 processFile filename = do
@@ -101,8 +113,8 @@ processFile filename = do
                               , postCreator = creator
                               , postContent = content_encoded
                               , postId = post_id_i
-                              , postDate = post_date_p
-                              , postDateGmt = post_date_gmt_p
+                              , postDate = computeZonedTime post_date_p post_date_gmt_p
+                              , postModifiedDate = computeZonedTime post_modified_p post_modified_gmt_p
                               , postName = post_name
                               , postStatus = post_status
                               , postCategories = categories
@@ -118,8 +130,8 @@ processFile filename = do
                               , postCreator = creator
                               , postContent = content_encoded
                               , postId = post_id_i
-                              , postDate = post_date_p
-                              , postDateGmt = post_date_gmt_p
+                              , postDate = computeZonedTime post_date_p post_date_gmt_p
+                              , postModifiedDate = computeZonedTime post_modified_p post_modified_gmt_p
                               , postName = post_name
                               , postStatus = post_status
                               , postCategories = categories
