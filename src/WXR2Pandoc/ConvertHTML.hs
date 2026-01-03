@@ -9,9 +9,10 @@ module WXR2Pandoc.ConvertHTML
   ) where
 import qualified Data.ByteString as BS
 import qualified Data.Map as Map
+import           Data.Maybe (maybeToList)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import           Data.Time
+import           Data.Time.Format.ISO8601
 import           Text.Pandoc.Class (runPure)
 import           Text.Pandoc.Definition as P
 import qualified Text.Pandoc.Error as P
@@ -45,11 +46,14 @@ parsePostWith :: HTMLReader -> Post -> Either P.PandocError Pandoc
 parsePostWith reader Post{..} = do
   Pandoc _ body <- parseWpHtmlWith reader postContent
   let meta = Meta $ Map.fromList $
-               [("title", MetaString postTitle)]
+               [("title", MetaString postTitle)
+               ,("wp_id", MetaString $ T.pack $ show postId)
+               ,("categories", MetaList (map MetaString postCategories))
+               ,("tags", MetaList (map MetaString postTags))]
+               ++ [("slug", MetaString postName) | not (T.null postName)]
                ++ [("draft", MetaBool True) | postStatus == "draft"]
-               ++ [("categories", MetaList (map MetaString postCategories))]
-               ++ [("tags", MetaList (map MetaString postTags))]
-               ++ [("date", MetaString $ T.pack $ formatTime defaultTimeLocale rfc822DateFormat pd) | Just pd <- [postDate]]
+               ++ [("date", MetaString $ T.pack $ iso8601Show pd) | pd <- maybeToList postDate]
+               ++ [("lastmod", MetaString $ T.pack $ iso8601Show pd) | pd <- maybeToList postModifiedDate]
   pure $ Pandoc meta body
 
 writeCommonMarkFile :: FilePath -> Pandoc -> IO ()
