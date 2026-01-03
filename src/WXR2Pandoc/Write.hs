@@ -7,13 +7,15 @@ module WXR2Pandoc.Write
   , writeCommonMarkFile
   , writePandocJSONFile
   , makeRelativeUrl
+  , expandOutputPath
   ) where
 import qualified Data.ByteString as BS
 import           Data.List (stripPrefix)
 import qualified Data.Map as Map
-import           Data.Maybe (maybeToList)
+import           Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import           Data.Time (LocalTime (..), ZonedTime (..), toGregorian)
 import           Data.Time.Format.ISO8601
 import           Network.URI (URI (..), parseAbsoluteURI)
 import           Text.Pandoc.Class (runPure)
@@ -28,6 +30,7 @@ import           Text.Pandoc.Templates
 import qualified Text.Pandoc.Walk as P
 import           Text.Pandoc.Writers (writeJSON)
 import           Text.Pandoc.Writers.Markdown (writeCommonMark)
+import           Text.Printf (printf)
 -- import           Text.Pandoc.Writers.XML (writeXML) -- pandoc >= 3.8
 import           WXR2Pandoc.Filter
 import           WXR2Pandoc.ParseHTML
@@ -35,6 +38,38 @@ import           WXR2Pandoc.WXR
 
 data HTMLReader = HTMLReaderPandoc | HTMLReaderCustom
                 deriving (Eq, Show)
+
+-- | Expand output path template with post variables.
+-- Supported variables:
+--   {url}      - relative URL (from base URL)
+--   {slug}     - post name/slug
+--   {postname} - alias for slug
+--   {year}     - 4-digit year
+--   {monthnum} - 2-digit month
+--   {day}      - 2-digit day
+--   {post_id}  - WordPress post ID
+--   {ext}      - file extension (md, txt, json)
+expandOutputPath :: T.Text -> Maybe T.Text -> Post -> T.Text -> T.Text
+expandOutputPath template baseUrl Post{..} ext =
+  let relativeUrl = baseUrl >>= \base -> makeRelativeUrl base postLink
+      (year, month, day) = case postDate of
+        Just zt -> let LocalTime d _ = zonedTimeToLocalTime zt
+                       (y, m, dy) = toGregorian d
+                   in (show y, printf "%02d" m, printf "%02d" dy)
+        Nothing -> ("0000", "00", "00")
+      replacements =
+        [ ("{url}", fromMaybe "" relativeUrl)
+        , ("{slug}", postName)
+        , ("{postname}", postName)
+        , ("{year}", T.pack year)
+        , ("{monthnum}", T.pack month)
+        , ("{day}", T.pack day)
+        , ("{post_id}", T.pack $ show postId)
+        , ("{ext}", ext)
+        ]
+      applyReplacements t [] = t
+      applyReplacements t ((from, to):rest) = applyReplacements (T.replace from to t) rest
+  in applyReplacements template replacements
 
 -- | Extract relative URL path from an absolute URL by removing the base URL.
 -- If the URL doesn't start with the base URL, returns Nothing.

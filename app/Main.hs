@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 module Main (main) where
 import           Control.Applicative
@@ -7,14 +8,16 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Options.Applicative as OA
 import           System.Directory
+import           System.FilePath (takeDirectory)
 import           System.IO
 import qualified Text.Pandoc.Error as P
 import           WXR2Pandoc.Write
-import           WXR2Pandoc.WXR (Item (..), Post (..), processFile)
+import           WXR2Pandoc.WXR (Item (..), Post (..), postName, processFile)
 
 data AppOptions = AppOptions
   { baseUrl        :: Maybe T.Text
   , outputDir      :: String
+  , outputPath     :: Maybe T.Text
   , outputRaw      :: Bool
   -- , outputXml      :: Bool
   , outputJson     :: Bool
@@ -27,6 +30,7 @@ appOptions :: OA.Parser AppOptions
 appOptions = AppOptions
   <$> optional (OA.strOption (OA.long "base-url" <> OA.metavar "URL"))
   <*> OA.strOption (OA.long "output" <> OA.metavar "DIR")
+  <*> optional (OA.strOption (OA.long "output-path" <> OA.metavar "TEMPLATE" <> OA.help "Output path template with {url}, {slug}, {year}, {monthnum}, {day}, {post_id}, {ext}"))
   <*> OA.switch (OA.long "raw" <> OA.help "Emit raw HTML")
   -- <*> OA.switch (OA.long "pandoc-xml" <> OA.help "Emit Pandoc XML")
   <*> OA.switch (OA.long "pandoc-json" <> OA.help "Emit Pandoc JSON")
@@ -47,9 +51,18 @@ main = do
       case parsePostWith htmlReader baseUrl p of
         Left e -> hPutStrLn stderr $ "Error: " ++ T.unpack (P.renderError e) ++ " while reading " ++ T.unpack (postName p)
         Right doc -> do
-          createDirectoryIfMissing True outputDir
-          let outputBase = outputDir ++ "/" ++ show (postId p) ++ "-" ++ T.unpack (postName p)
-          writeCommonMarkFile (outputBase ++ ".md") doc
-          when outputJson $ writePandocJSONFile (outputBase ++ ".json") doc
-          when outputRaw $ BS.writeFile (outputBase ++ ".txt") $ T.encodeUtf8 $ postContent p
+          let getOutputPath ext = case outputPath of
+                Just tpl -> outputDir ++ "/" ++ T.unpack (expandOutputPath tpl baseUrl p ext)
+                Nothing  -> outputDir ++ "/" ++ show (postId p) ++ "-" ++ T.unpack (postName p) ++ "." ++ T.unpack ext
+          let mdPath = getOutputPath "md"
+          createDirectoryIfMissing True (takeDirectory mdPath)
+          writeCommonMarkFile mdPath doc
+          when outputJson $ do
+            let jsonPath = getOutputPath "json"
+            createDirectoryIfMissing True (takeDirectory jsonPath)
+            writePandocJSONFile jsonPath doc
+          when outputRaw $ do
+            let txtPath = getOutputPath "txt"
+            createDirectoryIfMissing True (takeDirectory txtPath)
+            BS.writeFile txtPath $ T.encodeUtf8 $ postContent p
     ItemAttachment _ -> pure ()
