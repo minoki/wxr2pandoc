@@ -1,29 +1,42 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 module Main (main) where
 import           Control.Applicative
+import           Control.Concurrent.Async (forConcurrently_)
+import           Control.Concurrent.QSem
+import           Control.Exception (SomeException, bracket_, try)
 import           Control.Monad
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LBS
+import           Data.List (nub)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import           Network.HTTP.Client
+import           Network.HTTP.Client.TLS (tlsManagerSettings)
+import           Network.URI (parseAbsoluteURI, uriPath)
 import qualified Options.Applicative as OA
 import           System.Directory
-import           System.FilePath (takeDirectory)
+import           System.FilePath (takeDirectory, (</>))
 import           System.IO
+import           Text.Pandoc.Definition (Inline (..), Pandoc (..))
 import qualified Text.Pandoc.Error as P
+import           Text.Pandoc.Walk (query)
 import           WXR2Pandoc.Write
 import           WXR2Pandoc.WXR (Item (..), Post (..), postName, processFile)
 
 data AppOptions = AppOptions
-  { baseUrl        :: Maybe T.Text
-  , outputDir      :: String
-  , outputPath     :: Maybe T.Text
-  , outputRaw      :: Bool
-  -- , outputXml      :: Bool
-  , outputJson     :: Bool
-  , outputMarkdown :: Bool
-  , htmlReader     :: HTMLReader
-  , inputXml       :: String
+  { baseUrl              :: Maybe T.Text
+  , outputDir            :: String
+  , outputPath           :: Maybe T.Text
+  , outputRaw            :: Bool
+  -- , outputXml         :: Bool
+  , outputJson           :: Bool
+  , outputMarkdown       :: Bool
+  , htmlReader           :: HTMLReader
+  , downloadMedia        :: Bool
+  , maxParallelDownloads :: Int
+  , inputXml             :: String
   }
 
 appOptions :: OA.Parser AppOptions
@@ -36,7 +49,59 @@ appOptions = AppOptions
   <*> OA.switch (OA.long "pandoc-json" <> OA.help "Emit Pandoc JSON")
   <*> OA.switch (OA.long "markdown" <> OA.help "Emit Markdown")
   <*> OA.flag HTMLReaderPandoc HTMLReaderCustom (OA.long "custom-parser" <> OA.help "Use custom HTML parser instead of Pandoc")
+  <*> OA.switch (OA.long "download-media" <> OA.help "Download media files")
+  <*> OA.option OA.auto (OA.long "max-parallel-downloads" <> OA.metavar "N" <> OA.value 5 <> OA.help "Maximum parallel downloads (default: 5)")
   <*> OA.argument OA.str (OA.metavar "FILE.xml")
+
+-- | Extract all media URLs from a Pandoc document (images and links to media files)
+extractMediaUrls :: Pandoc -> [T.Text]
+extractMediaUrls = nub . query extractFromInline
+  where
+    extractFromInline :: Inline -> [T.Text]
+    extractFromInline (Image _ _ (url, _)) = [url | isMediaUrl url]
+    extractFromInline (Link _ _ (url, _))  = [url | isMediaUrl url]
+    extractFromInline _                    = []
+
+    isMediaUrl :: T.Text -> Bool
+    isMediaUrl url = any (`T.isSuffixOf` T.toLower url) mediaExtensions
+
+    mediaExtensions :: [T.Text]
+    mediaExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
+                       ".mp4", ".webm", ".ogg", ".mp3", ".wav", ".pdf"]
+
+-- | Extract the path from a URL for local file storage
+urlToLocalPath :: String -> T.Text -> Maybe FilePath
+urlToLocalPath outDir url = do
+  uri <- parseAbsoluteURI (T.unpack url)
+  let path = uriPath uri
+  -- Remove leading slash and ensure path is safe
+  let cleanPath = dropWhile (== '/') path
+  if null cleanPath
+    then Nothing
+    else Just (outDir </> cleanPath)
+
+-- | Download a single file from URL to local path
+downloadFile :: Manager -> T.Text -> FilePath -> IO ()
+downloadFile manager url localPath = do
+  hPutStrLn stderr $ "Downloading: " ++ T.unpack url
+  request <- parseRequest (T.unpack url)
+  response <- httpLbs request manager
+  createDirectoryIfMissing True (takeDirectory localPath)
+  LBS.writeFile localPath (responseBody response)
+
+-- | Download multiple files in parallel with a concurrency limit
+downloadMediaFiles :: Int -> String -> [T.Text] -> IO ()
+downloadMediaFiles maxParallel outDir urls = do
+  manager <- newManager tlsManagerSettings
+  sem <- newQSem maxParallel
+  let urlsWithPaths = [(url, path) | url <- urls, Just path <- [urlToLocalPath outDir url]]
+  forConcurrently_ urlsWithPaths $ \(url, localPath) ->
+    bracket_ (waitQSem sem) (signalQSem sem) $ do
+      result <- try $ downloadFile manager url localPath
+      case result of
+        Left (e :: SomeException) ->
+          hPutStrLn stderr $ "Error downloading " ++ T.unpack url ++ ": " ++ show e
+        Right () -> pure ()
 
 main :: IO ()
 main = do
@@ -46,8 +111,10 @@ main = do
          <> OA.header "wxr2pandoc")
   AppOptions {..} <- OA.execParser opts
   items <- processFile inputXml
-  forM_ items $ \item -> case item of
-    ItemPost p       -> do
+
+  -- Process documents
+  forM_ items $ \case
+    ItemPost p -> do
       case parsePostWith htmlReader baseUrl p of
         Left e -> hPutStrLn stderr $ "Error: " ++ T.unpack (P.renderError e) ++ " while reading " ++ T.unpack (postName p)
         Right doc -> do
@@ -66,3 +133,17 @@ main = do
             createDirectoryIfMissing True (takeDirectory txtPath)
             BS.writeFile txtPath $ T.encodeUtf8 $ postContent p
     ItemAttachment _ -> pure ()
+
+  -- Download media files if enabled
+  when downloadMedia $ do
+    let allMediaUrls = concatMap extractMediaUrlsFromItem items
+        extractMediaUrlsFromItem (ItemPost p) =
+          case parsePostWith htmlReader baseUrl p of
+            Left _    -> []
+            Right doc -> extractMediaUrls doc
+        extractMediaUrlsFromItem (ItemAttachment url) = [url]
+        uniqueUrls = nub allMediaUrls
+    unless (null uniqueUrls) $ do
+      hPutStrLn stderr $ "Downloading " ++ show (length uniqueUrls) ++ " media files..."
+      downloadMediaFiles maxParallelDownloads outputDir uniqueUrls
+      hPutStrLn stderr "Download complete."
