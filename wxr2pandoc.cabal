@@ -77,5 +77,4 @@ test-suite wxr2pandoc-test
         tasty >=1.4 && <1.6,
         tasty-hunit >=0.10 && <0.11,
         pandoc >=3.7.0.2 && <3.9,
-        pandoc-types ^>=1.23.1,
         wxr2pandoc

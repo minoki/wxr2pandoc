@@ -19,9 +19,7 @@ import qualified Options.Applicative as OA
 import           System.Directory
 import           System.FilePath (takeDirectory, (</>))
 import           System.IO
-import           Text.Pandoc.Definition (Inline (..), Pandoc (..))
 import qualified Text.Pandoc.Error as P
-import           Text.Pandoc.Walk (query)
 import           WXR2Pandoc.Write
 import           WXR2Pandoc.WXR (Item (..), Post (..), postName, processFile)
 
@@ -52,22 +50,6 @@ appOptions = AppOptions
   <*> OA.switch (OA.long "download-media" <> OA.help "Download media files")
   <*> OA.option OA.auto (OA.long "max-parallel-downloads" <> OA.metavar "N" <> OA.value 5 <> OA.help "Maximum parallel downloads (default: 5)")
   <*> OA.argument OA.str (OA.metavar "FILE.xml")
-
--- | Extract all media URLs from a Pandoc document (images and links to media files)
-extractMediaUrls :: Pandoc -> [T.Text]
-extractMediaUrls = nub . query extractFromInline
-  where
-    extractFromInline :: Inline -> [T.Text]
-    extractFromInline (Image _ _ (url, _)) = [url | isMediaUrl url]
-    extractFromInline (Link _ _ (url, _))  = [url | isMediaUrl url]
-    extractFromInline _                    = []
-
-    isMediaUrl :: T.Text -> Bool
-    isMediaUrl url = any (`T.isSuffixOf` T.toLower url) mediaExtensions
-
-    mediaExtensions :: [T.Text]
-    mediaExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
-                       ".mp4", ".webm", ".ogg", ".mp3", ".wav", ".pdf"]
 
 -- | Extract the path from a URL for local file storage
 urlToLocalPath :: String -> T.Text -> Maybe FilePath
@@ -137,10 +119,7 @@ main = do
   -- Download media files if enabled
   when downloadMedia $ do
     let allMediaUrls = concatMap extractMediaUrlsFromItem items
-        extractMediaUrlsFromItem (ItemPost p) =
-          case parsePostWith htmlReader baseUrl p of
-            Left _    -> []
-            Right doc -> extractMediaUrls doc
+        extractMediaUrlsFromItem (ItemPost _) = []
         extractMediaUrlsFromItem (ItemAttachment url) = [url]
         uniqueUrls = nub allMediaUrls
     unless (null uniqueUrls) $ do
