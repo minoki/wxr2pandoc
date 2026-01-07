@@ -4,6 +4,7 @@
 module Main (main) where
 import           Control.Applicative
 import           Control.Concurrent.Async (forConcurrently_)
+import           Control.Concurrent.MVar
 import           Control.Concurrent.QSem
 import           Control.Exception (SomeException, bracket_, try)
 import           Control.Monad
@@ -68,10 +69,14 @@ urlToLocalPath outDir url = do
     then Nothing
     else Just (outDir </> cleanPath)
 
+-- | Thread-safe stderr output
+logStderr :: MVar () -> String -> IO ()
+logStderr lock msg = withMVar lock $ \_ -> hPutStrLn stderr msg
+
 -- | Download a single file from URL to local path
-downloadFile :: Manager -> T.Text -> FilePath -> IO ()
-downloadFile manager url localPath = do
-  hPutStrLn stderr $ "Downloading: " ++ T.unpack url
+downloadFile :: MVar () -> Manager -> T.Text -> FilePath -> IO ()
+downloadFile lock manager url localPath = do
+  logStderr lock $ "Downloading: " ++ T.unpack url
   request <- parseRequest (T.unpack url)
   response <- httpLbs request manager
   createDirectoryIfMissing True (takeDirectory localPath)
@@ -84,6 +89,7 @@ downloadMediaFiles maxParallel maxFailures outDir urls = do
   let tlsSettings = TLSSettingsSimple False False False (def { supportedExtendedMainSecret = AllowEMS })
   manager <- newManager $ mkManagerSettings tlsSettings Nothing
   sem <- newQSem maxParallel
+  lock <- newMVar ()
   -- Tracks (failure count, aborted flag)
   stateRef <- newIORef (0 :: Int, False)
   let urlsWithPaths = [(url, path) | url <- urls, Just path <- [urlToLocalPath outDir url]]
@@ -91,10 +97,10 @@ downloadMediaFiles maxParallel maxFailures outDir urls = do
     bracket_ (waitQSem sem) (signalQSem sem) $ do
       (_, aborted) <- readIORef stateRef
       unless aborted $ do
-        result <- try $ downloadFile manager url localPath
+        result <- try $ downloadFile lock manager url localPath
         case result of
           Left (e :: SomeException) -> do
-            hPutStrLn stderr $ "Error downloading " ++ T.unpack url ++ ": " ++ show e
+            logStderr lock $ "Error downloading " ++ T.unpack url ++ ": " ++ show e
             shouldAbort <- atomicModifyIORef' stateRef $ \(count, aborted') ->
               if aborted'
                 then ((count, True), False)  -- Already aborted
@@ -103,7 +109,7 @@ downloadMediaFiles maxParallel maxFailures outDir urls = do
                         then ((newCount, True), True)   -- This thread triggers abort
                         else ((newCount, False), False) -- Continue
             when shouldAbort $
-              hPutStrLn stderr $ "Aborting: " ++ show maxFailures ++ " download failures"
+              logStderr lock $ "Aborting: " ++ show maxFailures ++ " download failures"
           Right () -> pure ()
   (_, aborted) <- readIORef stateRef
   pure (not aborted)
