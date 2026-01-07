@@ -9,12 +9,15 @@ import           Control.Exception (SomeException, bracket_, try)
 import           Control.Monad
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import           Data.Default (def)
 import           Data.IORef
 import           Data.List (nub)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import           Network.Connection (TLSSettings (..))
 import           Network.HTTP.Client
-import           Network.HTTP.Client.TLS (tlsManagerSettings)
+import           Network.HTTP.Client.TLS (mkManagerSettings)
+import           Network.TLS (EMSMode (AllowEMS), supportedExtendedMainSecret)
 import           Network.URI (parseAbsoluteURI, uriPath)
 import qualified Options.Applicative as OA
 import           System.Directory
@@ -78,7 +81,8 @@ downloadFile manager url localPath = do
 -- Returns True if completed successfully, False if aborted due to too many failures
 downloadMediaFiles :: Int -> Int -> String -> [T.Text] -> IO Bool
 downloadMediaFiles maxParallel maxFailures outDir urls = do
-  manager <- newManager tlsManagerSettings
+  let tlsSettings = TLSSettingsSimple False False False (def { supportedExtendedMainSecret = AllowEMS })
+  manager <- newManager $ mkManagerSettings tlsSettings Nothing
   sem <- newQSem maxParallel
   -- Tracks (failure count, aborted flag)
   stateRef <- newIORef (0 :: Int, False)

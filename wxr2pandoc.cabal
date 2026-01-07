@@ -58,6 +58,9 @@ executable wxr2pandoc
         http-client-tls >=0.3.6.4 && <0.4,
         async >=2.2.5 && <2.3,
         network-uri >=2.6.4.2 && <2.8,
+        crypton-connection ^>=0.4.5,
+        tls ^>=2.1.8,
+        data-default ^>=0.8.0.1,
         wxr2pandoc
 
     hs-source-dirs:   app
