@@ -9,6 +9,7 @@ import           Control.Exception (SomeException, bracket_, try)
 import           Control.Monad
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import           Data.IORef
 import           Data.List (nub)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -34,6 +35,7 @@ data AppOptions = AppOptions
   , htmlReader           :: HTMLReader
   , downloadMedia        :: Bool
   , maxParallelDownloads :: Int
+  , maxDownloadFailures  :: Int
   , inputXml             :: String
   }
 
@@ -49,6 +51,7 @@ appOptions = AppOptions
   <*> OA.flag HTMLReaderPandoc HTMLReaderCustom (OA.long "custom-parser" <> OA.help "Use custom HTML parser instead of Pandoc")
   <*> OA.switch (OA.long "download-media" <> OA.help "Download media files")
   <*> OA.option OA.auto (OA.long "max-parallel-downloads" <> OA.metavar "N" <> OA.value 5 <> OA.help "Maximum parallel downloads (default: 5)")
+  <*> OA.option OA.auto (OA.long "max-download-failures" <> OA.metavar "N" <> OA.value 5 <> OA.help "Abort after N download failures (default: 5)")
   <*> OA.argument OA.str (OA.metavar "FILE.xml")
 
 -- | Extract the path from a URL for local file storage
@@ -72,18 +75,34 @@ downloadFile manager url localPath = do
   LBS.writeFile localPath (responseBody response)
 
 -- | Download multiple files in parallel with a concurrency limit
-downloadMediaFiles :: Int -> String -> [T.Text] -> IO ()
-downloadMediaFiles maxParallel outDir urls = do
+-- Returns True if completed successfully, False if aborted due to too many failures
+downloadMediaFiles :: Int -> Int -> String -> [T.Text] -> IO Bool
+downloadMediaFiles maxParallel maxFailures outDir urls = do
   manager <- newManager tlsManagerSettings
   sem <- newQSem maxParallel
+  -- Tracks (failure count, aborted flag)
+  stateRef <- newIORef (0 :: Int, False)
   let urlsWithPaths = [(url, path) | url <- urls, Just path <- [urlToLocalPath outDir url]]
   forConcurrently_ urlsWithPaths $ \(url, localPath) ->
     bracket_ (waitQSem sem) (signalQSem sem) $ do
-      result <- try $ downloadFile manager url localPath
-      case result of
-        Left (e :: SomeException) ->
-          hPutStrLn stderr $ "Error downloading " ++ T.unpack url ++ ": " ++ show e
-        Right () -> pure ()
+      (_, aborted) <- readIORef stateRef
+      unless aborted $ do
+        result <- try $ downloadFile manager url localPath
+        case result of
+          Left (e :: SomeException) -> do
+            hPutStrLn stderr $ "Error downloading " ++ T.unpack url ++ ": " ++ show e
+            shouldAbort <- atomicModifyIORef' stateRef $ \(count, aborted') ->
+              if aborted'
+                then ((count, True), False)  -- Already aborted
+                else let newCount = count + 1
+                     in if newCount >= maxFailures
+                        then ((newCount, True), True)   -- This thread triggers abort
+                        else ((newCount, False), False) -- Continue
+            when shouldAbort $
+              hPutStrLn stderr $ "Aborting: " ++ show maxFailures ++ " download failures"
+          Right () -> pure ()
+  (_, aborted) <- readIORef stateRef
+  pure (not aborted)
 
 main :: IO ()
 main = do
@@ -119,10 +138,10 @@ main = do
   -- Download media files if enabled
   when downloadMedia $ do
     let allMediaUrls = concatMap extractMediaUrlsFromItem items
-        extractMediaUrlsFromItem (ItemPost _) = []
+        extractMediaUrlsFromItem (ItemPost _)         = []
         extractMediaUrlsFromItem (ItemAttachment url) = [url]
         uniqueUrls = nub allMediaUrls
     unless (null uniqueUrls) $ do
       hPutStrLn stderr $ "Downloading " ++ show (length uniqueUrls) ++ " media files..."
-      downloadMediaFiles maxParallelDownloads outputDir uniqueUrls
-      hPutStrLn stderr "Download complete."
+      ok <- downloadMediaFiles maxParallelDownloads maxDownloadFailures outputDir uniqueUrls
+      hPutStrLn stderr $ if ok then "Download complete." else "Download failed."
