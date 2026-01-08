@@ -3,7 +3,7 @@ name:               wxr2pandoc
 version:            0.1.0.0
 -- synopsis:
 -- description:
-license:            MIT
+license:            GPL-2.0-or-later
 license-file:       LICENSE
 author:             ARATA Mizuki
 maintainer:         minorinoki@gmail.com
