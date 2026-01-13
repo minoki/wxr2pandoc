@@ -46,35 +46,56 @@ import qualified Text.Pandoc.Error as P
 import           WXR2Pandoc.Write
 import           WXR2Pandoc.WXR (Item (..), Post (..), postName, processFile)
 
-data AppOptions = AppOptions
-  { baseUrl              :: Maybe T.Text
-  , outputDir            :: String
-  , outputPath           :: Maybe T.Text
-  , outputRaw            :: Bool
-  -- , outputXml         :: Bool
-  , outputJson           :: Bool
-  , outputMarkdown       :: Bool
-  , htmlReader           :: HTMLReader
-  , downloadMedia        :: Bool
-  , maxParallelDownloads :: Int
-  , maxDownloadFailures  :: Int
-  , inputXml             :: String
+-- | Subcommand type
+data Command
+  = ConvertAll ConvertAllOptions
+  | DownloadMedia DownloadMediaOptions
+
+-- | Options for convert-all subcommand
+data ConvertAllOptions = ConvertAllOptions
+  { caBaseUrl    :: Maybe T.Text
+  , caOutputDir  :: String
+  , caOutputPath :: Maybe T.Text
+  , caOutputRaw  :: Bool
+  , caOutputJson :: Bool
+  , caHtmlReader :: HTMLReader
+  , caInputXml   :: String
   }
 
-appOptions :: OA.Parser AppOptions
-appOptions = AppOptions
+-- | Options for download-media subcommand
+data DownloadMediaOptions = DownloadMediaOptions
+  { dmOutputDir           :: String
+  , dmMaxParallelDownloads :: Int
+  , dmMaxDownloadFailures  :: Int
+  , dmInputXml            :: String
+  }
+
+convertAllOptions :: OA.Parser ConvertAllOptions
+convertAllOptions = ConvertAllOptions
   <$> optional (OA.strOption (OA.long "base-url" <> OA.metavar "URL"))
   <*> OA.strOption (OA.long "output" <> OA.metavar "DIR")
   <*> optional (OA.strOption (OA.long "output-path" <> OA.metavar "TEMPLATE" <> OA.help "Output path template with {url}, {slug}, {year}, {monthnum}, {day}, {post_id}, {ext}"))
   <*> OA.switch (OA.long "raw" <> OA.help "Emit raw HTML")
-  -- <*> OA.switch (OA.long "pandoc-xml" <> OA.help "Emit Pandoc XML")
   <*> OA.switch (OA.long "pandoc-json" <> OA.help "Emit Pandoc JSON")
-  <*> OA.switch (OA.long "markdown" <> OA.help "Emit Markdown")
   <*> OA.flag HTMLReaderPandoc HTMLReaderCustom (OA.long "custom-parser" <> OA.help "Use custom HTML parser instead of Pandoc")
-  <*> OA.switch (OA.long "download-media" <> OA.help "Download media files")
+  <*> OA.argument OA.str (OA.metavar "FILE.xml")
+
+downloadMediaOptions :: OA.Parser DownloadMediaOptions
+downloadMediaOptions = DownloadMediaOptions
+  <$> OA.strOption (OA.long "output" <> OA.metavar "DIR")
   <*> OA.option OA.auto (OA.long "max-parallel-downloads" <> OA.metavar "N" <> OA.value 5 <> OA.help "Maximum parallel downloads (default: 5)")
   <*> OA.option OA.auto (OA.long "max-download-failures" <> OA.metavar "N" <> OA.value 5 <> OA.help "Abort after N download failures (default: 5)")
   <*> OA.argument OA.str (OA.metavar "FILE.xml")
+
+commandParser :: OA.Parser Command
+commandParser = OA.subparser
+  ( OA.command "convert-all"
+      (OA.info (ConvertAll <$> convertAllOptions <**> OA.helper)
+               (OA.progDesc "Convert all posts to Markdown"))
+  <> OA.command "download-media"
+      (OA.info (DownloadMedia <$> downloadMediaOptions <**> OA.helper)
+               (OA.progDesc "Download media files"))
+  )
 
 -- | Extract the path from a URL for local file storage
 urlToLocalPath :: String -> T.Text -> Maybe FilePath
@@ -134,42 +155,51 @@ downloadMediaFiles maxParallel maxFailures outDir urls = do
 
 main :: IO ()
 main = do
-  let opts = OA.info (appOptions <**> OA.helper)
+  let opts = OA.info (commandParser <**> OA.helper)
         (OA.fullDesc
          <> OA.progDesc "Convert WordPress Extended RSS (WXR) file to Markdown using Pandoc"
          <> OA.header "wxr2pandoc")
-  AppOptions {..} <- OA.execParser opts
-  items <- processFile inputXml
+  cmd <- OA.execParser opts
+  case cmd of
+    ConvertAll options -> runConvertAll options
+    DownloadMedia options -> runDownloadMedia options
 
-  -- Process documents
+-- | Run convert-all subcommand
+runConvertAll :: ConvertAllOptions -> IO ()
+runConvertAll ConvertAllOptions {..} = do
+  items <- processFile caInputXml
   forM_ items $ \case
     ItemPost p -> do
-      case parsePostWith htmlReader baseUrl p of
+      case parsePostWith caHtmlReader caBaseUrl p of
         Left e -> hPutStrLn stderr $ "Error: " ++ T.unpack (P.renderError e) ++ " while reading " ++ T.unpack (postName p)
         Right doc -> do
-          let getOutputPath ext = case outputPath of
-                Just tpl -> outputDir ++ "/" ++ T.unpack (expandOutputPath tpl baseUrl p ext)
-                Nothing  -> outputDir ++ "/" ++ show (postId p) ++ "-" ++ T.unpack (postName p) ++ "." ++ T.unpack ext
+          let getOutputPath ext = case caOutputPath of
+                Just tpl -> caOutputDir ++ "/" ++ T.unpack (expandOutputPath tpl caBaseUrl p ext)
+                Nothing  -> caOutputDir ++ "/" ++ show (postId p) ++ "-" ++ T.unpack (postName p) ++ "." ++ T.unpack ext
           let mdPath = getOutputPath "md"
           createDirectoryIfMissing True (takeDirectory mdPath)
           writeCommonMarkFile mdPath doc
-          when outputJson $ do
+          when caOutputJson $ do
             let jsonPath = getOutputPath "json"
             createDirectoryIfMissing True (takeDirectory jsonPath)
             writePandocJSONFile jsonPath doc
-          when outputRaw $ do
+          when caOutputRaw $ do
             let txtPath = getOutputPath "txt"
             createDirectoryIfMissing True (takeDirectory txtPath)
             BS.writeFile txtPath $ T.encodeUtf8 $ postContent p
     ItemAttachment _ -> pure ()
 
-  -- Download media files if enabled
-  when downloadMedia $ do
-    let allMediaUrls = concatMap extractMediaUrlsFromItem items
-        extractMediaUrlsFromItem (ItemPost _)         = []
-        extractMediaUrlsFromItem (ItemAttachment url) = [url]
-        uniqueUrls = nub allMediaUrls
-    unless (null uniqueUrls) $ do
+-- | Run download-media subcommand
+runDownloadMedia :: DownloadMediaOptions -> IO ()
+runDownloadMedia DownloadMediaOptions {..} = do
+  items <- processFile dmInputXml
+  let allMediaUrls = concatMap extractMediaUrlsFromItem items
+      extractMediaUrlsFromItem (ItemPost _)         = []
+      extractMediaUrlsFromItem (ItemAttachment url) = [url]
+      uniqueUrls = nub allMediaUrls
+  if null uniqueUrls
+    then hPutStrLn stderr "No media files to download."
+    else do
       hPutStrLn stderr $ "Downloading " ++ show (length uniqueUrls) ++ " media files..."
-      ok <- downloadMediaFiles maxParallelDownloads maxDownloadFailures outputDir uniqueUrls
+      ok <- downloadMediaFiles dmMaxParallelDownloads dmMaxDownloadFailures dmOutputDir uniqueUrls
       hPutStrLn stderr $ if ok then "Download complete." else "Download failed."
