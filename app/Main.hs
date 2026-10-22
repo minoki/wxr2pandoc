@@ -57,6 +57,7 @@ data Command
   = ConvertAll (Maybe PostType) ConvertAllOptions -- ^ Nothing converts both posts and pages
   | DownloadMedia DownloadMediaOptions
   | ExportCategories ExportCategoriesOptions
+  | GenerateUrlRewriter GenerateUrlRewriterOptions
 
 -- | Options for convert-all, convert-posts and convert-pages subcommands
 data ConvertAllOptions = ConvertAllOptions
@@ -88,6 +89,12 @@ data ExportCategoriesOptions = ExportCategoriesOptions
   , ecInputXml     :: String
   }
 
+-- | Options for generate-url-rewriter subcommand
+data GenerateUrlRewriterOptions = GenerateUrlRewriterOptions
+  { guOutputFile :: Maybe FilePath
+  , guInputXml   :: String
+  }
+
 convertAllOptions :: OA.Parser ConvertAllOptions
 convertAllOptions = ConvertAllOptions
   <$> optional (OA.strOption (OA.long "base-url" <> OA.metavar "URL" <> OA.help "Base URL of the blog (e.g. https://blog.example.com/), used to compute relative URLs for {url} and the 'url' metadata, and to rewrite links into the site as root-relative URLs"))
@@ -113,6 +120,11 @@ exportCategoriesOptions :: OA.Parser ExportCategoriesOptions
 exportCategoriesOptions = ExportCategoriesOptions
   <$> OA.strOption (OA.long "output" <> OA.metavar "DIR" <> OA.help "Output directory, e.g. content/categories; each category is written to DIR/<slug>/_index.md (required)")
   <*> OA.strOption (OA.long "category-base" <> OA.metavar "PATH" <> OA.value "category" <> OA.showDefault <> OA.help "Category base of the WordPress permalinks, used for the 'url' of child categories")
+  <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
+
+generateUrlRewriterOptions :: OA.Parser GenerateUrlRewriterOptions
+generateUrlRewriterOptions = GenerateUrlRewriterOptions
+  <$> optional (OA.strOption (OA.long "output" <> OA.metavar "FILE" <> OA.help "Output file, e.g. static/.htaccess (default: standard output)"))
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 -- | Build a footer from lines, keeping line breaks as-is
@@ -158,6 +170,13 @@ commandParser = OA.hsubparser
                 <> footerLines
                      [ "Example:"
                      , "  wxr2pandoc export-categories --output content/categories WordPress.xml"
+                     ]))
+  <> OA.command "generate-url-rewriter"
+      (OA.info (GenerateUrlRewriter <$> generateUrlRewriterOptions)
+               (OA.progDesc "Generate an Apache .htaccess that redirects ?p=ID and ?page_id=ID to the permalinks of published posts and pages"
+                <> footerLines
+                     [ "Example:"
+                     , "  wxr2pandoc generate-url-rewriter --output static/.htaccess WordPress.xml"
                      ]))
   )
 
@@ -232,6 +251,7 @@ main = do
     ConvertAll typ options -> runConvertAll typ options
     DownloadMedia options -> runDownloadMedia options
     ExportCategories options -> runExportCategories options
+    GenerateUrlRewriter options -> runGenerateUrlRewriter options
 
 -- | Run convert-all subcommand, or convert-posts/convert-pages if a post type is given
 runConvertAll :: Maybe PostType -> ConvertAllOptions -> IO ()
@@ -285,3 +305,14 @@ runExportCategories ExportCategoriesOptions {..} = do
     let path = ecOutputDir </> T.unpack (categorySlug c) </> "_index.md"
     createDirectoryIfMissing True (takeDirectory path)
     BS.writeFile path $ T.encodeUtf8 $ categoryIndexContent ecCategoryBase categories c
+
+-- | Run generate-url-rewriter subcommand
+runGenerateUrlRewriter :: GenerateUrlRewriterOptions -> IO ()
+runGenerateUrlRewriter GenerateUrlRewriterOptions {..} = do
+  items <- processFile guInputXml
+  let content = T.encodeUtf8 $ urlRewriterContent [p | ItemPost p <- items]
+  case guOutputFile of
+    Just path -> do
+      createDirectoryIfMissing True (takeDirectory path)
+      BS.writeFile path content
+    Nothing -> BS.putStr content
