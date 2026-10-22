@@ -241,14 +241,14 @@ unparseShortcode (RawInline (P.Format "wordpress") content) = Str content
 unparseShortcode inl = inl
 
 -- | If the math consists only of macro definitions
--- (@\\newcommand@, @\\renewcommand@, @\\providecommand@, @\\def@),
+-- (@\\newcommand@, @\\renewcommand@, @\\providecommand@, @\\def@, @\\DeclareMathOperator@),
 -- return them. @\\require{...}@ (MathJax extensions) is also allowed and dropped.
 mathPreambleDefinitions :: T.Text -> Maybe [T.Text]
 mathPreambleDefinitions content = case A.parseOnly (A.skipSpace *> many (itemP <* A.skipSpace) <* A.endOfInput) content of
     Right items | defs@(_:_) <- catMaybes items -> Just defs
     _ -> Nothing
   where
-    itemP = (Just . fst <$> A.match (newcommandP <|> defP)) <|> (Nothing <$ requireP)
+    itemP = (Just . fst <$> A.match (newcommandP <|> defP <|> declareMathOperatorP)) <|> (Nothing <$ requireP)
     newcommandP = do
       _ <- A.string "\\newcommand" <|> A.string "\\renewcommand" <|> A.string "\\providecommand"
       _ <- optional (A.char '*')
@@ -263,6 +263,13 @@ mathPreambleDefinitions content = case A.parseOnly (A.skipSpace *> many (itemP <
       A.skipSpace
       _ <- csNameP
       _ <- A.takeWhile (\c -> c == '#' || isDigit c)
+      groupP
+    declareMathOperatorP = do
+      _ <- A.string "\\DeclareMathOperator"
+      _ <- optional (A.char '*')
+      A.skipSpace
+      _ <- (A.char '{' *> A.skipSpace *> csNameP <* A.skipSpace <* A.char '}') <|> csNameP
+      A.skipSpace
       groupP
     requireP = A.string "\\require" *> A.skipSpace *> groupP
     csNameP = A.char '\\' *> (A.takeWhile1 isLetter <|> (T.singleton <$> A.anyChar))

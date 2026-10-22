@@ -95,7 +95,7 @@ convertAllOptions = ConvertAllOptions
   <*> OA.switch (OA.long "raw" <> OA.help "Also emit the raw HTML content as .txt")
   <*> OA.switch (OA.long "pandoc-json" <> OA.help "Also emit the Pandoc AST as .json")
   <*> OA.flag HTMLReaderPandoc HTMLReaderCustom (OA.long "custom-parser" <> OA.help "Use custom HTML parser instead of Pandoc")
-  <*> OA.switch (OA.long "hoist-math-preamble" <> OA.help "Move math consisting only of macro definitions (\\newcommand, \\def, etc.) to the 'mathPreamble' metadata")
+  <*> OA.switch (OA.long "hoist-math-preamble" <> OA.help "Move math consisting only of macro definitions (\\newcommand, \\def, \\DeclareMathOperator, etc.) to the 'mathPreamble' metadata")
   <*> OA.switch (OA.long "math-delimiter-entities" <> OA.help "Write brackets and dollar signs in plain text as &lbrack;, &rbrack; and &dollar; instead of \\[, \\] and $, which Hugo's passthrough extension takes as math delimiters")
   <*> OA.switch (OA.long "relative-media" <> OA.help "Also rewrite URLs of media files (under wp-content/) into the site as root-relative URLs (with --base-url), for media placed by 'download-media --output <hugo site>/static'")
   <*> optional (OA.strOption (OA.long "embed-shortcode" <> OA.metavar "NAME" <> OA.help "Replace embed blocks of pages of the site with a Hugo shortcode like {{< NAME \"/2026/07/hello/\" >}} (with --base-url)"))

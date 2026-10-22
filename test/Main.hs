@@ -669,6 +669,12 @@ hoistMathPreambleTests = testGroup "hoistMathPreamble"
              , "\\newcommand{\\f}[2][x]{#1^{#2}}"
              , "\\def\\pair#1#2{(#1,#2)}"
              ]
+  , testCase "\\DeclareMathOperator" $
+      mathPreambleDefinitions "\\DeclareMathOperator{\\rank}{rank} \\DeclareMathOperator*{\\argmax}{arg\\,max}\\DeclareMathOperator\\Hom{Hom}" @?=
+        Just [ "\\DeclareMathOperator{\\rank}{rank}"
+             , "\\DeclareMathOperator*{\\argmax}{arg\\,max}"
+             , "\\DeclareMathOperator\\Hom{Hom}"
+             ]
   , testCase "\\require is dropped" $
       mathPreambleDefinitions "\\require{AMScd}\\def\\Real{\\mathbf{R}}" @?= Just ["\\def\\Real{\\mathbf{R}}"]
   , testCase "nested braces and escaped braces" $
