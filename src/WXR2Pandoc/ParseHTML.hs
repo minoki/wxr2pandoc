@@ -22,7 +22,7 @@ import           Text.Pandoc.Definition (Alignment (..), Attr, Block (..),
                                          RowHeadColumns (..), RowSpan (..),
                                          TableBody (..), TableFoot (..),
                                          TableHead (..))
-import           WXR2Pandoc.Filter (wpBasicHtmlFilter)
+import           WXR2Pandoc.Filter (escapedShortcodeP, wpBasicHtmlFilter)
 
 -- | Token types for WordPress HTML
 data Token
@@ -113,7 +113,7 @@ newlineP = do
 
 -- | Parser for separating shortcodes, math, and newline from text
 textTokenP :: A.Parser Token
-textTokenP = shortcodeP <|> latexEnvP <|> mathInlineP <|> mathDisplayP <|> newlineP <|> singleCharP
+textTokenP = (TokText <$> escapedShortcodeP) <|> shortcodeP <|> latexEnvP <|> mathInlineP <|> mathDisplayP <|> newlineP <|> singleCharP
   where
     -- Single character fallback when parsing fails
     singleCharP = TokText . T.singleton <$> A.anyChar
@@ -558,6 +558,11 @@ collectCodeContent = go []
     go acc (TokTagClose "code" : rest) = (T.concat $ reverse acc, rest)
     go acc (TokText t : rest)          = go (t : acc) rest
     go acc (TokNewlines n : rest)      = go (T.replicate n "\n" : acc) rest
+    go acc (TokShortcode _ src : rest) = go (src : acc) rest
+    go acc (TokShortcodeClose _ src : rest) = go (src : acc) rest
+    go acc (TokMathInline m : rest)    = go ("\\(" <> m <> "\\)" : acc) rest
+    go acc (TokMathDisplay m : rest)   = go ("\\[" <> m <> "\\]" : acc) rest
+    go acc (TokLatexEnv src : rest)    = go (src : acc) rest
     go acc (_ : rest)                  = go acc rest
 
 -- | Check if character is horizontal whitespace (space or tab)

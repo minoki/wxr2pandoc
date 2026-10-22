@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module WXR2Pandoc.Filter where
 import           Control.Applicative
+import           Control.Monad (guard)
 import qualified Data.Aeson as JSON
 import qualified Data.Attoparsec.Text as A
 import           Data.Char (isDigit, isLetter)
@@ -47,6 +48,38 @@ attachCodeBlockClass (Para [RawInline (P.Format "html") tag] : CodeBlock (ident,
 attachCodeBlockClass (x : xs) = x : attachCodeBlockClass xs
 attachCodeBlockClass [] = []
 
+-- | Shortcodes registered on the blog.
+-- Only these are unescaped by 'escapedShortcodeP', since @[[a]]@ also appears in code.
+knownShortcodeNames :: [T.Text]
+knownShortcodeNames =
+  [ "caption", "code", "sourcecode", "latex", "mathjax", "toc"
+  , "TeX-logo", "LaTeX-logo", "XeTeX-logo", "XeLaTeX-logo", "BibTeX-logo", "xypic-logo" ]
+
+-- | Escaped shortcode @[[name attr="val"]]@ or @[[/name]]@, which WordPress displays as @[name attr="val"]@ or @[/name]@.
+-- Returns the text with the outer brackets removed.
+escapedShortcodeP :: A.Parser T.Text
+escapedShortcodeP = do
+  _ <- A.char '['
+  (inner, _) <- A.match $ do
+    _ <- A.char '['
+    _ <- optional (A.char '/')
+    name <- A.takeWhile1 isShortcodeNameChar
+    guard (name `elem` knownShortcodeNames)
+    _ <- many (A.space *> A.many1 A.letter *> A.char '=' *> A.char '"' *> A.takeWhile (/= '"') *> A.char '"')
+    A.char ']'
+  _ <- A.char ']'
+  pure inner
+
+-- | Unescape escaped shortcodes in text, e.g. in inline code
+unescapeShortcodes :: T.Text -> T.Text
+unescapeShortcodes t = case A.parseOnly (many ((escapedShortcodeP <|> (T.singleton <$> A.anyChar))) <* A.endOfInput) t of
+  Right chunks -> T.concat chunks
+  Left _       -> t
+
+unescapeShortcodeInCode :: Inline -> Inline
+unescapeShortcodeInCode (Code attr content) = Code attr (unescapeShortcodes content)
+unescapeShortcodeInCode inl = inl
+
 shortcodeP :: A.Parser Inline
 shortcodeP = (\(s,_) -> RawInline (P.Format "wordpress") s) <$> A.match (A.char '[' *> A.takeWhile1 isShortcodeNameChar *> many attr *> A.char ']')
   where
@@ -65,7 +98,7 @@ latexEnvironmentP = (\(s,_) -> RawInline (P.Format "tex") s) <$> A.match p
           A.manyTill A.anyChar (A.string ("\\end{" <> name <> "}"))
 
 strElemP :: A.Parser Inline
-strElemP = shortcodeP <|> closeShortcodeP <|> latexEnvironmentP <|> {- plainStrP <|> -} plainCharP
+strElemP = (Str <$> escapedShortcodeP) <|> shortcodeP <|> closeShortcodeP <|> latexEnvironmentP <|> {- plainStrP <|> -} plainCharP
   where
     -- plainStrP = Str <$> A.takeWhile1 (\c -> c /= '\\' && c /= '[')
     plainCharP = Str . T.singleton <$> A.anyChar
@@ -198,7 +231,7 @@ normalizeMathSpace (Math mathType content) = Math mathType (T.replace "\x00A0" "
 normalizeMathSpace inl = inl
 
 wpHtmlFilter :: Pandoc -> Pandoc
-wpHtmlFilter = P.walk normalizeMathSpace . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
+wpHtmlFilter = P.walk normalizeMathSpace . P.walk unescapeShortcodeInCode . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
 
 wpBasicHtmlFilter :: Pandoc -> Pandoc
 wpBasicHtmlFilter = P.walk normalizeMathSpace . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass

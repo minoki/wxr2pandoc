@@ -311,7 +311,23 @@ mathTests = testGroup "Math"
 -- | WordPress shortcode tests for parseWpHtml
 shortcodeTests :: TestTree
 shortcodeTests = testGroup "Shortcodes"
-  [ testCase "simple shortcode" $
+  [ testCase "escaped shortcode" $
+      parseWpHtml "<p>[[LaTeX-logo]] and [[/caption]]</p>" @?=
+        doc [Para [Str "[LaTeX-logo]", Space, Str "and", Space, Str "[/caption]"]]
+
+  , testCase "escaped shortcode with attributes" $
+      parseWpHtml "<p>[[code lang=\"c\"]]</p>" @?=
+        doc [Para [Str "[code", Space, Str "lang=\"c\"]"]]
+
+  , testCase "escaped shortcode in code" $
+      parseWpHtml "<p><code>[[LaTeX-logo]]</code></p>" @?=
+        doc [Para [Code ("", [], []) "[LaTeX-logo]"]]
+
+  , testCase "double brackets with unknown name are kept" $
+      parseWpHtml "<p><code>concat :: [[a]] -&gt; [a]</code></p>" @?=
+        doc [Para [Code ("", [], []) "concat :: [[a]] -> [a]"]]
+
+  , testCase "simple shortcode" $
       parseWpHtml "<p>[gallery]</p>" @?=
         doc [Para [RawInline (Format "wordpress") "[gallery]"]]
 
@@ -544,7 +560,23 @@ pandocFilterTests = testGroup "wpHtmlFilter"
 -- | WordPress shortcode tests
 pandocShortcodeTests :: TestTree
 pandocShortcodeTests = testGroup "Shortcodes"
-  [ testCase "mathjax shortcode is removed" $
+  [ testCase "escaped shortcode" $
+      parsePandoc "<p>[[LaTeX-logo]] and [[/caption]]</p>" @?=
+        doc [Para [Str "[LaTeX-logo]", Space, Str "and", Space, Str "[/caption]"]]
+
+  , testCase "escaped shortcode with attributes" $
+      parsePandoc "<p>[[code lang=\"c\"]]</p>" @?=
+        doc [Para [Str "[code lang=\"c\"]"]]
+
+  , testCase "escaped shortcode in code" $
+      parsePandoc "<p><code>[[LaTeX-logo]]</code></p>" @?=
+        doc [Para [Code ("", [], []) "[LaTeX-logo]"]]
+
+  , testCase "double brackets with unknown name are kept" $
+      parsePandoc "<p><code>concat :: [[a]] -&gt; [a]</code></p>" @?=
+        doc [Para [Code ("", [], []) "concat :: [[a]] -> [a]"]]
+
+  , testCase "mathjax shortcode is removed" $
       parsePandoc "<p>[mathjax]Hello</p>" @?=
         doc [Para [Str "Hello"]]
 
