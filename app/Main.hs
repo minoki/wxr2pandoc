@@ -31,6 +31,7 @@ import qualified Data.ByteString.Lazy as LBS
 import           Data.Default (def)
 import           Data.IORef
 import           Data.List (nub)
+import           Data.Version (showVersion)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Network.Connection (TLSSettings (..))
@@ -39,6 +40,8 @@ import           Network.HTTP.Client.TLS (mkManagerSettings)
 import           Network.TLS (EMSMode (AllowEMS), supportedExtendedMainSecret)
 import           Network.URI (parseAbsoluteURI, uriPath)
 import qualified Options.Applicative as OA
+import           Options.Applicative.Help.Pretty (pretty, vsep)
+import           Paths_wxr2pandoc (version)
 import           System.Directory
 import           System.FilePath (takeDirectory, (</>))
 import           System.IO
@@ -72,29 +75,42 @@ data DownloadMediaOptions = DownloadMediaOptions
 
 convertAllOptions :: OA.Parser ConvertAllOptions
 convertAllOptions = ConvertAllOptions
-  <$> optional (OA.strOption (OA.long "base-url" <> OA.metavar "URL"))
-  <*> OA.strOption (OA.long "output" <> OA.metavar "DIR")
-  <*> optional (OA.strOption (OA.long "output-path" <> OA.metavar "TEMPLATE" <> OA.help "Output path template with {url}, {slug}, {year}, {monthnum}, {day}, {post_id}, {ext}"))
-  <*> OA.switch (OA.long "raw" <> OA.help "Emit raw HTML")
-  <*> OA.switch (OA.long "pandoc-json" <> OA.help "Emit Pandoc JSON")
+  <$> optional (OA.strOption (OA.long "base-url" <> OA.metavar "URL" <> OA.help "Base URL of the blog (e.g. https://blog.example.com/), used to compute relative URLs for {url} and the 'url' metadata"))
+  <*> OA.strOption (OA.long "output" <> OA.metavar "DIR" <> OA.help "Output directory (required)")
+  <*> optional (OA.strOption (OA.long "output-path" <> OA.metavar "TEMPLATE" <> OA.help "Output path template relative to DIR, with {url}, {slug}, {year}, {monthnum}, {day}, {post_id}, {ext} (default: {post_id}-{slug}.{ext})"))
+  <*> OA.switch (OA.long "raw" <> OA.help "Also emit the raw HTML content as .txt")
+  <*> OA.switch (OA.long "pandoc-json" <> OA.help "Also emit the Pandoc AST as .json")
   <*> OA.flag HTMLReaderPandoc HTMLReaderCustom (OA.long "custom-parser" <> OA.help "Use custom HTML parser instead of Pandoc")
-  <*> OA.argument OA.str (OA.metavar "FILE.xml")
+  <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 downloadMediaOptions :: OA.Parser DownloadMediaOptions
 downloadMediaOptions = DownloadMediaOptions
-  <$> OA.strOption (OA.long "output" <> OA.metavar "DIR")
-  <*> OA.option OA.auto (OA.long "max-parallel-downloads" <> OA.metavar "N" <> OA.value 5 <> OA.help "Maximum parallel downloads (default: 5)")
-  <*> OA.option OA.auto (OA.long "max-download-failures" <> OA.metavar "N" <> OA.value 5 <> OA.help "Abort after N download failures (default: 5)")
-  <*> OA.argument OA.str (OA.metavar "FILE.xml")
+  <$> OA.strOption (OA.long "output" <> OA.metavar "DIR" <> OA.help "Output directory; files are saved under DIR by their URL path (required)")
+  <*> OA.option OA.auto (OA.long "max-parallel-downloads" <> OA.metavar "N" <> OA.value 5 <> OA.showDefault <> OA.help "Maximum parallel downloads")
+  <*> OA.option OA.auto (OA.long "max-download-failures" <> OA.metavar "N" <> OA.value 5 <> OA.showDefault <> OA.help "Abort after N download failures")
+  <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
+
+-- | Build a footer from lines, keeping line breaks as-is
+footerLines :: [String] -> OA.InfoMod a
+footerLines = OA.footerDoc . Just . vsep . map pretty
 
 commandParser :: OA.Parser Command
-commandParser = OA.subparser
+commandParser = OA.hsubparser
   ( OA.command "convert-all"
-      (OA.info (ConvertAll <$> convertAllOptions <**> OA.helper)
-               (OA.progDesc "Convert all posts to Markdown"))
+      (OA.info (ConvertAll <$> convertAllOptions)
+               (OA.progDesc "Convert all posts and pages in a WXR file to Markdown files"
+                <> footerLines
+                     [ "Example:"
+                     , "  wxr2pandoc convert-all --output out --base-url https://blog.example.com/ \\"
+                     , "    --output-path '{year}/{monthnum}/{slug}.{ext}' WordPress.xml"
+                     ]))
   <> OA.command "download-media"
-      (OA.info (DownloadMedia <$> downloadMediaOptions <**> OA.helper)
-               (OA.progDesc "Download media files"))
+      (OA.info (DownloadMedia <$> downloadMediaOptions)
+               (OA.progDesc "Download media files (attachments) listed in a WXR file"
+                <> footerLines
+                     [ "Example:"
+                     , "  wxr2pandoc download-media --output media WordPress.xml"
+                     ]))
   )
 
 -- | Extract the path from a URL for local file storage
@@ -155,11 +171,15 @@ downloadMediaFiles maxParallel maxFailures outDir urls = do
 
 main :: IO ()
 main = do
-  let opts = OA.info (commandParser <**> OA.helper)
+  let opts = OA.info (commandParser <**> OA.helper <**> OA.simpleVersioner (showVersion version))
         (OA.fullDesc
-         <> OA.progDesc "Convert WordPress Extended RSS (WXR) file to Markdown using Pandoc"
-         <> OA.header "wxr2pandoc")
-  cmd <- OA.execParser opts
+         <> OA.progDesc "Convert a WordPress export file (WordPress eXtended RSS, WXR) to Markdown using Pandoc"
+         <> OA.header ("wxr2pandoc " ++ showVersion version)
+         <> footerLines
+              [ "Run 'wxr2pandoc COMMAND --help' for options of each command."
+              ])
+      prefs = OA.prefs (OA.showHelpOnEmpty <> OA.showHelpOnError)
+  cmd <- OA.customExecParser prefs opts
   case cmd of
     ConvertAll options -> runConvertAll options
     DownloadMedia options -> runDownloadMedia options

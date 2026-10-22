@@ -43,7 +43,8 @@ library
 executable wxr2pandoc
     import:           warnings
     main-is:          Main.hs
-    -- other-modules:
+    other-modules:    Paths_wxr2pandoc
+    autogen-modules:  Paths_wxr2pandoc
     -- other-extensions:
     build-depends:
         base >=4.19.0.0 && <4.23,
