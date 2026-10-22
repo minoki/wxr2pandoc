@@ -11,6 +11,7 @@ module WXR2Pandoc.Write
   , makeRelativeUrl
   , siteRelativeUrl
   , relativizeSiteUrls
+  , siteEmbedsToShortcode
   , expandOutputPath
   , categoryIndexContent
   ) where
@@ -147,6 +148,18 @@ relativizeSiteUrls includeMedia baseUrl (Pandoc (Meta meta) body) =
     -- Rewrite double-quoted attribute values consisting of a URL
     rawHtml = T.intercalate "\"" . zipWith (\i t -> if odd (i :: Int) then rewrite t else t) [0..] . T.splitOn "\""
 
+-- | Replace embed blocks (@wp-block-embed@) of pages of the site with a Hugo shortcode
+-- like @{{< blogcard "/2026/07/hello/" >}}@, given the shortcode name and the base URL
+siteEmbedsToShortcode :: T.Text -> T.Text -> Pandoc -> Pandoc
+siteEmbedsToShortcode name baseUrl = P.walk go
+  where
+    go (Figure (_, classes, _) (Caption Nothing []) [Div (_, ["wp-block-embed__wrapper"], _) [Plain inls]])
+      | "wp-block-embed" `elem` classes
+      , [Str url] <- filter (`notElem` [SoftBreak, Space, LineBreak]) inls
+      , Just (rel, False) <- siteRelativeUrl baseUrl url
+      = RawBlock (Format "commonmark") ("{{< " <> name <> " " <> jsonString rel <> " >}}")
+    go b = b
+
 parseWpHtmlWith :: HTMLReader -> T.Text -> Either P.PandocError Pandoc
 parseWpHtmlWith HTMLReaderPandoc content = fmap wpHtmlFilter . runPure $ readHtml readerOptions content
   where
@@ -213,13 +226,14 @@ quotedStringListKeys = ["years", "months", "images"]
 -- | Remove the 'quotedStringListKeys' from the metadata and render them as YAML lines
 takeQuotedStringLists :: Pandoc -> ([T.Text], Pandoc)
 takeQuotedStringLists (Pandoc (Meta meta) body) =
-  ( [ key <> ": [" <> T.intercalate ", " (map quote values) <> "]"
+  ( [ key <> ": [" <> T.intercalate ", " (map jsonString values) <> "]"
     | key <- quotedStringListKeys, Just (MetaList items) <- [Map.lookup key meta]
     , let values = [v | MetaString v <- items] ]
   , Pandoc (Meta (foldr Map.delete meta quotedStringListKeys)) body )
-  where
-    -- A JSON string is also a YAML double-quoted string
-    quote = T.decodeUtf8 . BS.toStrict . JSON.encode
+
+-- | A JSON string, which is also a YAML double-quoted string and a Go (Hugo shortcode) string
+jsonString :: T.Text -> T.Text
+jsonString = T.decodeUtf8 . BS.toStrict . JSON.encode
 
 -- | Append lines at the end of the YAML front matter
 insertFrontMatter :: [T.Text] -> T.Text -> T.Text

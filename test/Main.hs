@@ -20,7 +20,7 @@ import           WXR2Pandoc.ParseHTML (parseWpHtml)
 import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    mathDelimitersToEntities, parsePostWith,
                                    relativizeSiteUrls, renderCommonMark,
-                                   siteRelativeUrl)
+                                   siteEmbedsToShortcode, siteRelativeUrl)
 import           WXR2Pandoc.WXR (Post (..), PostType (..))
 
 main :: IO ()
@@ -48,6 +48,7 @@ tests = testGroup "WXR2Pandoc"
   , mathDelimitersToEntitiesTests
   , postMetadataTests
   , relativizeSiteUrlsTests
+  , siteEmbedsToShortcodeTests
   ]
 
 -- | Helper to create Pandoc with blocks
@@ -811,3 +812,20 @@ relativizeSiteUrlsTests = testGroup "relativizeSiteUrls"
   ]
   where
     base = "https://blog.example.com/"
+
+siteEmbedsToShortcodeTests :: TestTree
+siteEmbedsToShortcodeTests = testGroup "siteEmbedsToShortcode"
+  [ testCase "embed of a page of the site" $
+      siteEmbedsToShortcode "blogcard" base (doc [embed "https://blog.example.com/2026/07/hello/"]) @?=
+        doc [RawBlock (Format "commonmark") "{{< blogcard \"/2026/07/hello/\" >}}"]
+  , testCase "embeds of other sites and media are kept" $ do
+      siteEmbedsToShortcode "blogcard" base (doc [embed "https://www.youtube.com/watch?v=x"]) @?= doc [embed "https://www.youtube.com/watch?v=x"]
+      siteEmbedsToShortcode "blogcard" base (doc [embed "https://blog.example.com/wp-content/uploads/a.pdf"]) @?= doc [embed "https://blog.example.com/wp-content/uploads/a.pdf"]
+  , testCase "rendered as is" $
+      either (Left . show) Right (renderCommonMark False (siteEmbedsToShortcode "blogcard" base (doc [embed "https://blog.example.com/2026/07/hello/"]))) @?=
+        Right "{{< blogcard \"/2026/07/hello/\" >}}\n"
+  ]
+  where
+    base = "https://blog.example.com/"
+    embed url = Figure ("", ["wp-block-embed", "is-type-wp-embed"], []) (Caption Nothing [])
+      [Div ("", ["wp-block-embed__wrapper"], []) [Plain [SoftBreak, Str url, SoftBreak]]]

@@ -68,6 +68,7 @@ data ConvertAllOptions = ConvertAllOptions
   , caHoistMathPreamble :: Bool
   , caMathDelimiterEntities :: Bool
   , caRelativeMedia :: Bool
+  , caEmbedShortcode :: Maybe T.Text
   , caInputXml   :: String
   }
 
@@ -97,6 +98,7 @@ convertAllOptions = ConvertAllOptions
   <*> OA.switch (OA.long "hoist-math-preamble" <> OA.help "Move math consisting only of macro definitions (\\newcommand, \\def, etc.) to the 'mathPreamble' metadata")
   <*> OA.switch (OA.long "math-delimiter-entities" <> OA.help "Write brackets and dollar signs in plain text as &lbrack;, &rbrack; and &dollar; instead of \\[, \\] and $, which Hugo's passthrough extension takes as math delimiters")
   <*> OA.switch (OA.long "relative-media" <> OA.help "Also rewrite URLs of media files (under wp-content/) into the site as root-relative URLs (with --base-url), for media placed by 'download-media --output <hugo site>/static'")
+  <*> optional (OA.strOption (OA.long "embed-shortcode" <> OA.metavar "NAME" <> OA.help "Replace embed blocks of pages of the site with a Hugo shortcode like {{< NAME \"/2026/07/hello/\" >}} (with --base-url)"))
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 downloadMediaOptions :: OA.Parser DownloadMediaOptions
@@ -224,6 +226,7 @@ runConvertAll ConvertAllOptions {..} = do
         Left e -> hPutStrLn stderr $ "Error: " ++ T.unpack (P.renderError e) ++ " while reading " ++ T.unpack (postName p)
         Right doc0 -> do
           let doc = maybe id (relativizeSiteUrls caRelativeMedia) caBaseUrl $
+                    maybe id (uncurry siteEmbedsToShortcode) ((,) <$> caEmbedShortcode <*> caBaseUrl) $
                     if caHoistMathPreamble then hoistMathPreamble doc0 else doc0
           let getOutputPath ext = case caOutputPath of
                 Just tpl -> caOutputDir ++ "/" ++ T.unpack (expandOutputPath tpl caBaseUrl p ext)
