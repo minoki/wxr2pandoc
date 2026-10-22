@@ -15,6 +15,7 @@ import           Text.Pandoc.Readers.HTML (readHtml)
 import           WXR2Pandoc.Filter (hoistMathPreamble, mathPreambleDefinitions,
                                     wpHtmlFilter)
 import           WXR2Pandoc.ParseHTML (parseWpHtml)
+import           WXR2Pandoc.Write (mathDelimitersToEntities)
 
 main :: IO ()
 main = defaultMain tests
@@ -38,6 +39,7 @@ tests = testGroup "WXR2Pandoc"
     , pandocShortcodeTests
     ]
   , hoistMathPreambleTests
+  , mathDelimitersToEntitiesTests
   ]
 
 -- | Helper to create Pandoc with blocks
@@ -641,4 +643,19 @@ hoistMathPreambleTests = testGroup "hoistMathPreamble"
         docWithPreamble "\\def\\A{a}\n\\def\\B{b}\n" [Para [Str "A"], Para [Str "B"]]
   , testCase "no definitions" $
       hoistMathPreamble (parsePandoc "<p>\\(x\\)</p>") @?= doc [Para [Math InlineMath "x"]]
+  ]
+
+mathDelimitersToEntitiesTests :: TestTree
+mathDelimitersToEntitiesTests = testGroup "mathDelimitersToEntities"
+  [ testCase "brackets in Str" $
+      mathDelimitersToEntities [Str "a[b]]c", Space, Str "[d"] @?=
+        [ Str "a", RawInline (Format "html") "&lbrack;", Str "b"
+        , RawInline (Format "html") "&rbrack;", RawInline (Format "html") "&rbrack;", Str "c"
+        , Space, RawInline (Format "html") "&lbrack;", Str "d" ]
+  , testCase "dollar signs in Str" $
+      mathDelimitersToEntities [Str "$5", Space, Str "${PATH}"] @?=
+        [ RawInline (Format "html") "&dollar;", Str "5", Space
+        , RawInline (Format "html") "&dollar;", Str "{PATH}" ]
+  , testCase "code and math are untouched" $
+      mathDelimitersToEntities [Code nullAttr "[$a]", Math InlineMath "[a]"] @?= [Code nullAttr "[$a]", Math InlineMath "[a]"]
   ]

@@ -66,6 +66,7 @@ data ConvertAllOptions = ConvertAllOptions
   , caOutputJson :: Bool
   , caHtmlReader :: HTMLReader
   , caHoistMathPreamble :: Bool
+  , caMathDelimiterEntities :: Bool
   , caInputXml   :: String
   }
 
@@ -93,6 +94,7 @@ convertAllOptions = ConvertAllOptions
   <*> OA.switch (OA.long "pandoc-json" <> OA.help "Also emit the Pandoc AST as .json")
   <*> OA.flag HTMLReaderPandoc HTMLReaderCustom (OA.long "custom-parser" <> OA.help "Use custom HTML parser instead of Pandoc")
   <*> OA.switch (OA.long "hoist-math-preamble" <> OA.help "Move math consisting only of macro definitions (\\newcommand, \\def, etc.) to the 'mathPreamble' metadata")
+  <*> OA.switch (OA.long "math-delimiter-entities" <> OA.help "Write brackets and dollar signs in plain text as &lbrack;, &rbrack; and &dollar; instead of \\[, \\] and $, which Hugo's passthrough extension takes as math delimiters")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 downloadMediaOptions :: OA.Parser DownloadMediaOptions
@@ -225,7 +227,7 @@ runConvertAll ConvertAllOptions {..} = do
                 Nothing  -> caOutputDir ++ "/" ++ show (postId p) ++ "-" ++ T.unpack (postName p) ++ "." ++ T.unpack ext
           let mdPath = getOutputPath "md"
           createDirectoryIfMissing True (takeDirectory mdPath)
-          writeCommonMarkFile mdPath doc
+          writeCommonMarkFile caMathDelimiterEntities mdPath doc
           when caOutputJson $ do
             let jsonPath = getOutputPath "json"
             createDirectoryIfMissing True (takeDirectory jsonPath)

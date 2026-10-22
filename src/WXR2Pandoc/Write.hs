@@ -5,6 +5,7 @@ module WXR2Pandoc.Write
   , parseWpHtmlWith
   , parsePostWith
   , writeCommonMarkFile
+  , mathDelimitersToEntities
   , writePandocJSONFile
   , makeRelativeUrl
   , expandOutputPath
@@ -117,8 +118,12 @@ parsePostWith reader baseUrl Post{..} = do
                ++ [("lastmod", MetaString $ T.pack $ iso8601Show pd) | pd <- maybeToList postModifiedDate]
   pure $ Pandoc meta body
 
-writeCommonMarkFile :: FilePath -> Pandoc -> IO ()
-writeCommonMarkFile path doc = do
+-- | Write a CommonMark file.
+-- If the first argument is True, brackets and dollar signs in plain text are
+-- written as @&lbrack;@, @&rbrack;@ and @&dollar;@ instead of @\\[@, @\\]@
+-- and @$@, which would be taken as math delimiters by Hugo's passthrough extension.
+writeCommonMarkFile :: Bool -> FilePath -> Pandoc -> IO ()
+writeCommonMarkFile delimiterEntities path doc = do
   let writerOptions :: WriterOptions
       writerOptions = def { writerExtensions = writerExtensions def <> extensionsFromList [Ext_raw_html, Ext_raw_tex, Ext_tex_math_single_backslash, Ext_yaml_metadata_block]
                           , writerWrapText = P.WrapPreserve
@@ -128,8 +133,20 @@ writeCommonMarkFile path doc = do
     let tpl = case tplResult of
                 Left e  -> error e
                 Right t -> t
-    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ P.walk unparseShortcode doc
+    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unparseShortcode doc
   BS.writeFile path $ T.encodeUtf8 content
+
+-- | Replace brackets and dollar signs in Str with HTML entities
+mathDelimitersToEntities :: [Inline] -> [Inline]
+mathDelimitersToEntities = concatMap go
+  where
+    go (Str s) = filter (/= Str "") $ map toInline $ T.groupBy (\a b -> not (isDelimiter a) && not (isDelimiter b)) s
+    go inl     = [inl]
+    isDelimiter c = c == '[' || c == ']' || c == '$'
+    toInline "[" = RawInline (Format "html") "&lbrack;"
+    toInline "]" = RawInline (Format "html") "&rbrack;"
+    toInline "$" = RawInline (Format "html") "&dollar;"
+    toInline t   = Str t
 
 -- | Keep the mathPreamble metadata (TeX code) from being escaped as Markdown
 rawMathPreamble :: Pandoc -> Pandoc
