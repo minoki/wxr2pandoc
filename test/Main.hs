@@ -17,8 +17,9 @@ import           Text.Pandoc.Readers.HTML (readHtml)
 import           WXR2Pandoc.Filter (hoistMathPreamble, mathPreambleDefinitions,
                                     wpHtmlFilter)
 import           WXR2Pandoc.ParseHTML (parseWpHtml)
-import           WXR2Pandoc.Write (HTMLReader (..), mathDelimitersToEntities,
-                                   parsePostWith, renderCommonMark)
+import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
+                                   mathDelimitersToEntities, parsePostWith,
+                                   renderCommonMark)
 import           WXR2Pandoc.WXR (Post (..), PostType (..))
 
 main :: IO ()
@@ -760,6 +761,10 @@ postMetadataTests = testGroup "parsePostWith metadata"
           , ""
           , "Hello"
           ])
+  , testCase "output path uses the slug" $
+      expandOutputPath "{year}/{monthnum}/{slug}/index.{ext}" Nothing samplePost "md" @?= "2026/08/hello/index.md"
+  , testCase "output path uses the post ID for an empty slug" $
+      expandOutputPath "{year}/{monthnum}/{slug}/index.{ext}" Nothing samplePost { postName = "" } "md" @?= "2026/08/42/index.md"
   , testCase "no years and months without date" $
       case parsePostWith HTMLReaderCustom Nothing samplePost { postDate = Nothing } of
         Left e -> assertFailure (show e)

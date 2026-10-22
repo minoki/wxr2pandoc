@@ -46,7 +46,7 @@ data HTMLReader = HTMLReaderPandoc | HTMLReaderCustom
 -- | Expand output path template with post variables.
 -- Supported variables:
 --   {url}      - relative URL (from base URL)
---   {slug}     - post name/slug
+--   {slug}     - post name/slug (post ID if empty, e.g. for drafts)
 --   {postname} - alias for slug
 --   {year}     - 4-digit year
 --   {monthnum} - 2-digit month
@@ -57,10 +57,11 @@ expandOutputPath :: T.Text -> Maybe T.Text -> Post -> T.Text -> T.Text
 expandOutputPath template baseUrl Post{..} ext =
   let relativeUrl = baseUrl >>= \base -> makeRelativeUrl base postLink
       (year, month, day) = fromMaybe ("0000", "00", "00") (postYearMonthDay postDate)
+      slug = if T.null postName then T.pack (show postId) else postName
       replacements =
         [ ("{url}", fromMaybe "" relativeUrl)
-        , ("{slug}", postName)
-        , ("{postname}", postName)
+        , ("{slug}", slug)
+        , ("{postname}", slug)
         , ("{year}", T.pack year)
         , ("{monthnum}", T.pack month)
         , ("{day}", T.pack day)
