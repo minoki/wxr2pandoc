@@ -287,7 +287,11 @@ tableTests = testGroup "Tables"
 -- | Math tests
 mathTests :: TestTree
 mathTests = testGroup "Math"
-  [ testCase "inline math" $
+  [ testCase "no-break space in math becomes ordinary space" $
+      parseWpHtml "<p>\\(a&nbsp;+\x00A0\&b\\)</p>" @?=
+        doc [Para [Math InlineMath "a + b"]]
+
+  , testCase "inline math" $
       parseWpHtml "<p>The formula \\(x^2\\) is simple</p>" @?=
         doc [Para [Str "The", Space, Str "formula", Space, Math InlineMath "x^2", Space, Str "is", Space, Str "simple"]]
 
@@ -509,7 +513,10 @@ pandocBlockTests = testGroup "Block elements"
 -- | wpHtmlFilter specific tests
 pandocFilterTests :: TestTree
 pandocFilterTests = testGroup "wpHtmlFilter"
-  [ testCase "strips wp block comments" $
+  [ testCase "no-break space in math becomes ordinary space" $
+      parsePandoc "<p>\\(a&nbsp;+\x00A0\&b\\)</p>" @?=
+        doc [Para [Math InlineMath "a + b"]]
+  , testCase "strips wp block comments" $
       parsePandoc "<p><!-- wp:paragraph -->Hello<!-- /wp:paragraph --></p>" @?=
         doc [Para [Str "Hello"]]
 

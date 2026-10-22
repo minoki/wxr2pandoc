@@ -192,11 +192,16 @@ stripEmptyPara (Para [SoftBreak] : xs) = stripEmptyPara xs
 stripEmptyPara (x : xs)                = x : stripEmptyPara xs
 stripEmptyPara []                      = []
 
+-- | Replace no-break spaces (U+00A0) in math with ordinary spaces; KaTeX rejects them in strict mode
+normalizeMathSpace :: Inline -> Inline
+normalizeMathSpace (Math mathType content) = Math mathType (T.replace "\x00A0" " " content)
+normalizeMathSpace inl = inl
+
 wpHtmlFilter :: Pandoc -> Pandoc
-wpHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
+wpHtmlFilter = P.walk normalizeMathSpace . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
 
 wpBasicHtmlFilter :: Pandoc -> Pandoc
-wpBasicHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass
+wpBasicHtmlFilter = P.walk normalizeMathSpace . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass
 
 unparseShortcode :: Inline -> Inline
 unparseShortcode (RawInline (P.Format "wordpress") content) = Str content
