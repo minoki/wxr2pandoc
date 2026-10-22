@@ -48,16 +48,17 @@ import           System.IO
 import qualified Text.Pandoc.Error as P
 import           WXR2Pandoc.Filter (hoistMathPreamble)
 import           WXR2Pandoc.Write
-import           WXR2Pandoc.WXR (Category (..), Item (..), Post (..), postName,
-                                 processCategories, processFile)
+import           WXR2Pandoc.WXR (Category (..), Item (..), Post (..),
+                                 PostType (..), postName, processCategories,
+                                 processFile)
 
 -- | Subcommand type
 data Command
-  = ConvertAll ConvertAllOptions
+  = ConvertAll (Maybe PostType) ConvertAllOptions -- ^ Nothing converts both posts and pages
   | DownloadMedia DownloadMediaOptions
   | ExportCategories ExportCategoriesOptions
 
--- | Options for convert-all subcommand
+-- | Options for convert-all, convert-posts and convert-pages subcommands
 data ConvertAllOptions = ConvertAllOptions
   { caBaseUrl    :: Maybe T.Text
   , caOutputDir  :: String
@@ -121,12 +122,28 @@ footerLines = OA.footerDoc . Just . vsep . map pretty
 commandParser :: OA.Parser Command
 commandParser = OA.hsubparser
   ( OA.command "convert-all"
-      (OA.info (ConvertAll <$> convertAllOptions)
+      (OA.info (ConvertAll Nothing <$> convertAllOptions)
                (OA.progDesc "Convert all posts and pages in a WXR file to Markdown files"
                 <> footerLines
                      [ "Example:"
                      , "  wxr2pandoc convert-all --output out --base-url https://blog.example.com/ \\"
                      , "    --output-path '{year}/{monthnum}/{slug}.{ext}' WordPress.xml"
+                     ]))
+  <> OA.command "convert-posts"
+      (OA.info (ConvertAll (Just TypePost) <$> convertAllOptions)
+               (OA.progDesc "Convert only posts in a WXR file to Markdown files (same options as convert-all)"
+                <> footerLines
+                     [ "Example:"
+                     , "  wxr2pandoc convert-posts --output content/posts --base-url https://blog.example.com/ \\"
+                     , "    --output-path '{year}/{monthnum}/{slug}/index.{ext}' WordPress.xml"
+                     ]))
+  <> OA.command "convert-pages"
+      (OA.info (ConvertAll (Just TypePage) <$> convertAllOptions)
+               (OA.progDesc "Convert only pages in a WXR file to Markdown files (same options as convert-all)"
+                <> footerLines
+                     [ "Example:"
+                     , "  wxr2pandoc convert-pages --output content --base-url https://blog.example.com/ \\"
+                     , "    --output-path '{slug}/index.{ext}' WordPress.xml"
                      ]))
   <> OA.command "download-media"
       (OA.info (DownloadMedia <$> downloadMediaOptions)
@@ -212,16 +229,16 @@ main = do
       prefs = OA.prefs (OA.showHelpOnEmpty <> OA.showHelpOnError)
   cmd <- OA.customExecParser prefs opts
   case cmd of
-    ConvertAll options -> runConvertAll options
+    ConvertAll typ options -> runConvertAll typ options
     DownloadMedia options -> runDownloadMedia options
     ExportCategories options -> runExportCategories options
 
--- | Run convert-all subcommand
-runConvertAll :: ConvertAllOptions -> IO ()
-runConvertAll ConvertAllOptions {..} = do
+-- | Run convert-all subcommand, or convert-posts/convert-pages if a post type is given
+runConvertAll :: Maybe PostType -> ConvertAllOptions -> IO ()
+runConvertAll typ ConvertAllOptions {..} = do
   items <- processFile caInputXml
   forM_ items $ \case
-    ItemPost p -> do
+    ItemPost p | maybe True (== postType p) typ -> do
       case parsePostWith caHtmlReader caBaseUrl p of
         Left e -> hPutStrLn stderr $ "Error: " ++ T.unpack (P.renderError e) ++ " while reading " ++ T.unpack (postName p)
         Right doc0 -> do
@@ -242,6 +259,7 @@ runConvertAll ConvertAllOptions {..} = do
             let txtPath = getOutputPath "txt"
             createDirectoryIfMissing True (takeDirectory txtPath)
             BS.writeFile txtPath $ T.encodeUtf8 $ postContent p
+    ItemPost _ -> pure ()
     ItemAttachment _ -> pure ()
 
 -- | Run download-media subcommand
