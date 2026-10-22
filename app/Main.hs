@@ -47,12 +47,14 @@ import           System.FilePath (takeDirectory, (</>))
 import           System.IO
 import qualified Text.Pandoc.Error as P
 import           WXR2Pandoc.Write
-import           WXR2Pandoc.WXR (Item (..), Post (..), postName, processFile)
+import           WXR2Pandoc.WXR (Category (..), Item (..), Post (..), postName,
+                                 processCategories, processFile)
 
 -- | Subcommand type
 data Command
   = ConvertAll ConvertAllOptions
   | DownloadMedia DownloadMediaOptions
+  | ExportCategories ExportCategoriesOptions
 
 -- | Options for convert-all subcommand
 data ConvertAllOptions = ConvertAllOptions
@@ -73,6 +75,13 @@ data DownloadMediaOptions = DownloadMediaOptions
   , dmInputXml            :: String
   }
 
+-- | Options for export-categories subcommand
+data ExportCategoriesOptions = ExportCategoriesOptions
+  { ecOutputDir    :: String
+  , ecCategoryBase :: T.Text
+  , ecInputXml     :: String
+  }
+
 convertAllOptions :: OA.Parser ConvertAllOptions
 convertAllOptions = ConvertAllOptions
   <$> optional (OA.strOption (OA.long "base-url" <> OA.metavar "URL" <> OA.help "Base URL of the blog (e.g. https://blog.example.com/), used to compute relative URLs for {url} and the 'url' metadata"))
@@ -88,6 +97,12 @@ downloadMediaOptions = DownloadMediaOptions
   <$> OA.strOption (OA.long "output" <> OA.metavar "DIR" <> OA.help "Output directory; files are saved under DIR by their URL path (required)")
   <*> OA.option OA.auto (OA.long "max-parallel-downloads" <> OA.metavar "N" <> OA.value 5 <> OA.showDefault <> OA.help "Maximum parallel downloads")
   <*> OA.option OA.auto (OA.long "max-download-failures" <> OA.metavar "N" <> OA.value 5 <> OA.showDefault <> OA.help "Abort after N download failures")
+  <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
+
+exportCategoriesOptions :: OA.Parser ExportCategoriesOptions
+exportCategoriesOptions = ExportCategoriesOptions
+  <$> OA.strOption (OA.long "output" <> OA.metavar "DIR" <> OA.help "Output directory, e.g. content/categories; each category is written to DIR/<slug>/_index.md (required)")
+  <*> OA.strOption (OA.long "category-base" <> OA.metavar "PATH" <> OA.value "category" <> OA.showDefault <> OA.help "Category base of the WordPress permalinks, used for the 'url' of child categories")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 -- | Build a footer from lines, keeping line breaks as-is
@@ -110,6 +125,13 @@ commandParser = OA.hsubparser
                 <> footerLines
                      [ "Example:"
                      , "  wxr2pandoc download-media --output media WordPress.xml"
+                     ]))
+  <> OA.command "export-categories"
+      (OA.info (ExportCategories <$> exportCategoriesOptions)
+               (OA.progDesc "Write a Hugo term page (_index.md) for each category in a WXR file"
+                <> footerLines
+                     [ "Example:"
+                     , "  wxr2pandoc export-categories --output content/categories WordPress.xml"
                      ]))
   )
 
@@ -183,6 +205,7 @@ main = do
   case cmd of
     ConvertAll options -> runConvertAll options
     DownloadMedia options -> runDownloadMedia options
+    ExportCategories options -> runExportCategories options
 
 -- | Run convert-all subcommand
 runConvertAll :: ConvertAllOptions -> IO ()
@@ -223,3 +246,12 @@ runDownloadMedia DownloadMediaOptions {..} = do
       hPutStrLn stderr $ "Downloading " ++ show (length uniqueUrls) ++ " media files..."
       ok <- downloadMediaFiles dmMaxParallelDownloads dmMaxDownloadFailures dmOutputDir uniqueUrls
       hPutStrLn stderr $ if ok then "Download complete." else "Download failed."
+
+-- | Run export-categories subcommand
+runExportCategories :: ExportCategoriesOptions -> IO ()
+runExportCategories ExportCategoriesOptions {..} = do
+  categories <- processCategories ecInputXml
+  forM_ categories $ \c -> do
+    let path = ecOutputDir </> T.unpack (categorySlug c) </> "_index.md"
+    createDirectoryIfMissing True (takeDirectory path)
+    BS.writeFile path $ T.encodeUtf8 $ categoryIndexContent ecCategoryBase categories c

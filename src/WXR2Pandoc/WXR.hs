@@ -4,7 +4,9 @@ module WXR2Pandoc.WXR
   ( PostType(..)
   , Post(..)
   , Item(..)
+  , Category(..)
   , processFile
+  , processCategories
   ) where
 import           Control.Monad
 import           Data.Char
@@ -40,6 +42,14 @@ data Post = Post { postType         :: PostType
 data Item = ItemPost Post
           | ItemAttachment { attachmentUrl :: T.Text }
           deriving (Show)
+
+-- | A category defined by @<wp:category>@ in the channel
+data Category = Category { categorySlug        :: T.Text -- decoded nicename
+                         , categoryName        :: T.Text
+                         , categoryParent      :: Maybe T.Text -- slug of the parent
+                         , categoryDescription :: T.Text
+                         }
+              deriving (Show)
 
 namespace_dc, namespace_wp, namespace_content :: Maybe T.Text
 namespace_dc = Just "http://purl.org/dc/elements/1.1/"
@@ -158,3 +168,17 @@ processFile filename = do
       "custom_css" -> pure []
       _ -> do putStrLn $ "Unrecognized post type: " ++ T.unpack post_type
               pure []
+
+processCategories :: FilePath -> IO [Category]
+processCategories filename = do
+  doc <- XC.readFile XC.def filename
+  let doc_cursor = XC.fromDocument doc
+  let categories = doc_cursor XC.$| XC.child >=> XC.element (XC.Name "channel" Nothing Nothing) >=> XC.child >=> XC.element (XC.Name "category" namespace_wp Nothing)
+  pure $ flip map categories $ \category -> do
+    let field name = T.strip $ mconcat (category XC.$| XC.child >=> XC.element (XC.Name name namespace_wp Nothing) >=> XC.child >=> XC.content)
+    let parent = field "category_parent"
+    Category { categorySlug = decodeSlug (field "category_nicename")
+             , categoryName = field "cat_name"
+             , categoryParent = if T.null parent then Nothing else Just (decodeSlug parent)
+             , categoryDescription = field "category_description"
+             }

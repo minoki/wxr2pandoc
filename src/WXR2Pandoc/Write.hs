@@ -8,6 +8,7 @@ module WXR2Pandoc.Write
   , writePandocJSONFile
   , makeRelativeUrl
   , expandOutputPath
+  , categoryIndexContent
   ) where
 import qualified Data.ByteString as BS
 import           Data.List (stripPrefix)
@@ -138,3 +139,37 @@ writePandocJSONFile path doc = do
                           }
   content <- P.handleError $ runPure $ writeJSON writerOptions doc
   BS.writeFile path $ T.encodeUtf8 content
+
+-- | Render a Hugo term page (@content/categories/<slug>/_index.md@) for a category.
+-- A child category gets @parent@ and a @url@ like WordPress's
+-- @/<category base>/<parent>/<child>/@, given the category base (e.g. @category@).
+categoryIndexContent :: T.Text -> [Category] -> Category -> T.Text
+categoryIndexContent categoryBase allCategories category =
+  T.unlines $
+    ["+++"
+    ,"title = " <> tomlString (categoryName category)]
+    ++ ["description = " <> tomlString description | let description = categoryDescription category, not (T.null description)]
+    ++ concat [ ["url = " <> tomlString url
+                ,"parent = " <> tomlString parent]
+              | parent <- maybeToList (categoryParent category) ]
+    ++ ["+++"]
+  where
+    bySlug = Map.fromList [(categorySlug c, c) | c <- allCategories]
+    -- Slugs from the root to this category (bounded in case of a cycle)
+    ancestors = reverse $ take (length allCategories + 1) $ go category
+      where go c = categorySlug c : case categoryParent c of
+                     Nothing     -> []
+                     Just parent -> maybe [parent] go (Map.lookup parent bySlug)
+    url = "/" <> T.intercalate "/" (filter (not . T.null) (T.splitOn "/" categoryBase) ++ ancestors) <> "/"
+
+-- | A TOML basic string
+tomlString :: T.Text -> T.Text
+tomlString t = "\"" <> T.concatMap escape t <> "\""
+  where
+    escape '"'  = "\\\""
+    escape '\\' = "\\\\"
+    escape '\n' = "\\n"
+    escape '\r' = "\\r"
+    escape '\t' = "\\t"
+    escape c | c < ' ' || c == '\DEL' = T.pack (printf "\\u%04X" (fromEnum c))
+             | otherwise = T.singleton c
