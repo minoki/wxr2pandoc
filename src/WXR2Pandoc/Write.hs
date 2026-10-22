@@ -125,6 +125,8 @@ parsePostWith reader baseUrl Post{..} = do
                ++ concat [ [("years", MetaList [MetaString (T.pack y)])
                            ,("months", MetaList [MetaString (T.pack (y ++ "/" ++ m))])]
                          | (y, m, _) <- maybeToList (postYearMonthDay postDate) ]
+               -- Featured image, shown by the theme above the title
+               ++ [("images", MetaList [MetaString t]) | t <- maybeToList postThumbnail]
                ++ [("lastmod", MetaString $ T.pack $ iso8601Show pd) | pd <- maybeToList postModifiedDate]
   pure $ Pandoc meta body
 
@@ -155,9 +157,10 @@ renderCommonMark delimiterEntities doc = do
     (quotedLines, doc') = takeQuotedStringLists doc
 
 -- | Keys written as lists of quoted strings, like @years: ["2026"]@.
--- Pandoc writes @2026@ without quotes, which YAML reads as a number.
+-- Pandoc writes @2026@ without quotes, which YAML reads as a number,
+-- and would escape URLs as Markdown text.
 quotedStringListKeys :: [T.Text]
-quotedStringListKeys = ["years", "months"]
+quotedStringListKeys = ["years", "months", "images"]
 
 -- | Remove the 'quotedStringListKeys' from the metadata and render them as YAML lines
 takeQuotedStringLists :: Pandoc -> ([T.Text], Pandoc)

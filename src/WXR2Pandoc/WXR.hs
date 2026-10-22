@@ -36,6 +36,7 @@ data Post = Post { postType         :: PostType
                  , postStatus       :: T.Text -- publish, draft, inherit
                  , postCategories   :: [T.Text] -- slugs (nicename)
                  , postTags         :: [T.Text]
+                 , postThumbnail    :: Maybe T.Text -- URL of the featured image
                  }
           deriving (Show)
 
@@ -87,6 +88,14 @@ processFile filename = do
           Left err -> []
           Right (x, _) -> pure (x, link_content)
   -}
+  -- Attachment URLs by post ID, to resolve the featured images (_thumbnail_id)
+  let attachmentUrls :: Map.Map Int T.Text
+      attachmentUrls = Map.fromList $ do
+        item <- items
+        let field name = mconcat (item XC.$| XC.child >=> XC.element (XC.Name name namespace_wp Nothing) >=> XC.child >=> XC.content)
+        guard $ field "post_type" == "attachment"
+        Right (attachmentId, _) <- [T.decimal (field "post_id")]
+        pure (attachmentId, field "attachment_url")
   fmap concat . forM items $ \item -> do
     -- element (Name "title" Nothing Nothing) :: Axis
     let post_type = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "post_type" namespace_wp Nothing) >=> XC.child >=> XC.content)
@@ -122,6 +131,12 @@ processFile filename = do
                            []     -> XC.child c >>= XC.content
     let categories = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isCategory >=> categorySlug
     let tags = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isTag >=> XC.child >=> XC.content
+    let postmeta key = item XC.$| XC.child >=> XC.element (XC.Name "postmeta" namespace_wp Nothing)
+                                 >=> XC.check (\m -> mconcat (m XC.$/ XC.element (XC.Name "meta_key" namespace_wp Nothing) XC.&/ XC.content) == key)
+                                 >=> XC.child >=> XC.element (XC.Name "meta_value" namespace_wp Nothing) >=> XC.child >=> XC.content
+    let thumbnail = case postmeta "_thumbnail_id" of
+                      v:_ | Right (thumbnailId, _) <- T.decimal (T.strip v) -> Map.lookup thumbnailId attachmentUrls
+                      _ -> Nothing
     -- <wp:comment>...</wp:comment>
     -- print (title, link_content, pubDate_p, creator, post_name, post_id)
     case post_type of
@@ -139,6 +154,7 @@ processFile filename = do
                               , postStatus = post_status
                               , postCategories = categories
                               , postTags = tags
+                              , postThumbnail = thumbnail
                               }
              ]
       "page" -> do
@@ -156,6 +172,7 @@ processFile filename = do
                               , postStatus = post_status
                               , postCategories = categories
                               , postTags = tags
+                              , postThumbnail = thumbnail
                               }
              ]
       "attachment" -> do

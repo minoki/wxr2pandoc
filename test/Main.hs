@@ -720,6 +720,7 @@ samplePost = Post
   , postStatus = "publish"
   , postCategories = []
   , postTags = []
+  , postThumbnail = Nothing
   }
 
 postMetadataTests :: TestTree
@@ -740,6 +741,21 @@ postMetadataTests = testGroup "parsePostWith metadata"
           , "wp_id: 42"
           , "years: [\"2026\"]"
           , "months: [\"2026/08\"]"
+          , "---"
+          , ""
+          , "Hello"
+          ])
+  , testCase "featured image is written as images" $
+      either (Left . show) Right (parsePostWith HTMLReaderCustom Nothing samplePost { postThumbnail = Just "https://blog.example.com/wp-content/uploads/2026/08/cover_1.jpg" } >>= renderCommonMark False) @?=
+        Right (T.unlines
+          [ "---"
+          , "date: \"2026-08-01T00:30:00+09:00\""
+          , "slug: hello"
+          , "title: Title"
+          , "wp_id: 42"
+          , "years: [\"2026\"]"
+          , "months: [\"2026/08\"]"
+          , "images: [\"https://blog.example.com/wp-content/uploads/2026/08/cover_1.jpg\"]"
           , "---"
           , ""
           , "Hello"
