@@ -83,4 +83,5 @@ test-suite wxr2pandoc-test
         pandoc >=3.7.0.2 && <3.9,
         pandoc-types ^>=1.23.1,
         containers >=0.7 && <0.9,
+        time >=1.12.2 && <1.16,
         wxr2pandoc

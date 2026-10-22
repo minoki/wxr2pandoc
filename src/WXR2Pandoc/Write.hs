@@ -5,12 +5,14 @@ module WXR2Pandoc.Write
   , parseWpHtmlWith
   , parsePostWith
   , writeCommonMarkFile
+  , renderCommonMark
   , mathDelimitersToEntities
   , writePandocJSONFile
   , makeRelativeUrl
   , expandOutputPath
   , categoryIndexContent
   ) where
+import qualified Data.Aeson as JSON
 import qualified Data.ByteString as BS
 import           Data.List (stripPrefix)
 import qualified Data.Map as Map
@@ -54,11 +56,7 @@ data HTMLReader = HTMLReaderPandoc | HTMLReaderCustom
 expandOutputPath :: T.Text -> Maybe T.Text -> Post -> T.Text -> T.Text
 expandOutputPath template baseUrl Post{..} ext =
   let relativeUrl = baseUrl >>= \base -> makeRelativeUrl base postLink
-      (year, month, day) = case postDate of
-        Just zt -> let LocalTime d _ = zonedTimeToLocalTime zt
-                       (y, m, dy) = toGregorian d
-                   in (show y, printf "%02d" m, printf "%02d" dy)
-        Nothing -> ("0000", "00", "00")
+      (year, month, day) = fromMaybe ("0000", "00", "00") (postYearMonthDay postDate)
       replacements =
         [ ("{url}", fromMaybe "" relativeUrl)
         , ("{slug}", postName)
@@ -72,6 +70,14 @@ expandOutputPath template baseUrl Post{..} ext =
       applyReplacements t [] = t
       applyReplacements t ((from, to):rest) = applyReplacements (T.replace from to t) rest
   in applyReplacements template replacements
+
+-- | 4-digit year, 2-digit month and 2-digit day of the post date (in its local time)
+postYearMonthDay :: Maybe ZonedTime -> Maybe (String, String, String)
+postYearMonthDay date = do
+  zt <- date
+  let LocalTime d _ = zonedTimeToLocalTime zt
+      (y, m, dy) = toGregorian d
+  pure (show y, printf "%02d" m, printf "%02d" dy)
 
 -- | Extract relative URL path from an absolute URL by removing the base URL.
 -- If the URL doesn't start with the base URL, returns Nothing.
@@ -115,6 +121,10 @@ parsePostWith reader baseUrl Post{..} = do
                ++ [("slug", MetaString postName) | not (T.null postName)]
                ++ [("draft", MetaBool True) | postStatus == "draft"]
                ++ [("date", MetaString $ T.pack $ iso8601Show pd) | pd <- maybeToList postDate]
+               -- Hugo taxonomies for the date archives (/2026/ and /2026/07/)
+               ++ concat [ [("years", MetaList [MetaString (T.pack y)])
+                           ,("months", MetaList [MetaString (T.pack (y ++ "/" ++ m))])]
+                         | (y, m, _) <- maybeToList (postYearMonthDay postDate) ]
                ++ [("lastmod", MetaString $ T.pack $ iso8601Show pd) | pd <- maybeToList postModifiedDate]
   pure $ Pandoc meta body
 
@@ -124,17 +134,50 @@ parsePostWith reader baseUrl Post{..} = do
 -- and @$@, which would be taken as math delimiters by Hugo's passthrough extension.
 writeCommonMarkFile :: Bool -> FilePath -> Pandoc -> IO ()
 writeCommonMarkFile delimiterEntities path doc = do
+  content <- P.handleError $ renderCommonMark delimiterEntities doc
+  BS.writeFile path $ T.encodeUtf8 content
+
+-- | Render a document as CommonMark with YAML front matter (see 'writeCommonMarkFile')
+renderCommonMark :: Bool -> Pandoc -> Either P.PandocError T.Text
+renderCommonMark delimiterEntities doc = do
   let writerOptions :: WriterOptions
       writerOptions = def { writerExtensions = writerExtensions def <> extensionsFromList [Ext_raw_html, Ext_raw_tex, Ext_tex_math_single_backslash, Ext_yaml_metadata_block]
                           , writerWrapText = P.WrapPreserve
                           }
-  content <- P.handleError $ runPure $ do
+  content <- runPure $ do
     tplResult <- runWithPartials $ compileTemplate "" "$if(titleblock)$\n$titleblock$\n\n$endif$\n$body$\n"
     let tpl = case tplResult of
                 Left e  -> error e
                 Right t -> t
-    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unparseShortcode doc
-  BS.writeFile path $ T.encodeUtf8 content
+    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unparseShortcode doc'
+  pure $ insertFrontMatter quotedLines content
+  where
+    (quotedLines, doc') = takeQuotedStringLists doc
+
+-- | Keys written as lists of quoted strings, like @years: ["2026"]@.
+-- Pandoc writes @2026@ without quotes, which YAML reads as a number.
+quotedStringListKeys :: [T.Text]
+quotedStringListKeys = ["years", "months"]
+
+-- | Remove the 'quotedStringListKeys' from the metadata and render them as YAML lines
+takeQuotedStringLists :: Pandoc -> ([T.Text], Pandoc)
+takeQuotedStringLists (Pandoc (Meta meta) body) =
+  ( [ key <> ": [" <> T.intercalate ", " (map quote values) <> "]"
+    | key <- quotedStringListKeys, Just (MetaList items) <- [Map.lookup key meta]
+    , let values = [v | MetaString v <- items] ]
+  , Pandoc (Meta (foldr Map.delete meta quotedStringListKeys)) body )
+  where
+    -- A JSON string is also a YAML double-quoted string
+    quote = T.decodeUtf8 . BS.toStrict . JSON.encode
+
+-- | Append lines at the end of the YAML front matter
+insertFrontMatter :: [T.Text] -> T.Text -> T.Text
+insertFrontMatter [] content = content
+insertFrontMatter newLines content
+  | Just rest <- T.stripPrefix "---\n" content
+  , (front, end) <- T.breakOn "\n---\n" rest
+  , not (T.null end) = "---\n" <> front <> "\n" <> T.intercalate "\n" newLines <> end
+  | otherwise = "---\n" <> T.unlines newLines <> "---\n\n" <> content
 
 -- | Replace brackets and dollar signs in Str with HTML entities
 mathDelimitersToEntities :: [Inline] -> [Inline]

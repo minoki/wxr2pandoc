@@ -6,6 +6,8 @@ import           Test.Tasty.HUnit
 
 import qualified Data.Map as Map
 import qualified Data.Text as T
+import           Data.Time (LocalTime (..), TimeOfDay (..), ZonedTime (..),
+                            fromGregorian, hoursToTimeZone)
 import           Text.Pandoc.Class (runPure)
 import           Text.Pandoc.Definition
 import           Text.Pandoc.Extensions
@@ -15,7 +17,9 @@ import           Text.Pandoc.Readers.HTML (readHtml)
 import           WXR2Pandoc.Filter (hoistMathPreamble, mathPreambleDefinitions,
                                     wpHtmlFilter)
 import           WXR2Pandoc.ParseHTML (parseWpHtml)
-import           WXR2Pandoc.Write (mathDelimitersToEntities)
+import           WXR2Pandoc.Write (HTMLReader (..), mathDelimitersToEntities,
+                                   parsePostWith, renderCommonMark)
+import           WXR2Pandoc.WXR (Post (..), PostType (..))
 
 main :: IO ()
 main = defaultMain tests
@@ -40,6 +44,7 @@ tests = testGroup "WXR2Pandoc"
     ]
   , hoistMathPreambleTests
   , mathDelimitersToEntitiesTests
+  , postMetadataTests
   ]
 
 -- | Helper to create Pandoc with blocks
@@ -697,4 +702,52 @@ mathDelimitersToEntitiesTests = testGroup "mathDelimitersToEntities"
         , RawInline (Format "html") "&dollar;", Str "{PATH}" ]
   , testCase "code and math are untouched" $
       mathDelimitersToEntities [Code nullAttr "[$a]", Math InlineMath "[a]"] @?= [Code nullAttr "[$a]", Math InlineMath "[a]"]
+  ]
+
+-- | A post dated 2026-08-01 00:30 +09:00 (2026-07-31 in UTC)
+samplePost :: Post
+samplePost = Post
+  { postType = TypePost
+  , postTitle = "Title"
+  , postLink = "https://blog.example.com/2026/08/hello/"
+  , postPubDate = Nothing
+  , postCreator = ""
+  , postContent = "<p>Hello</p>"
+  , postId = 42
+  , postDate = Just (ZonedTime (LocalTime (fromGregorian 2026 8 1) (TimeOfDay 0 30 0)) (hoursToTimeZone 9))
+  , postModifiedDate = Nothing
+  , postName = "hello"
+  , postStatus = "publish"
+  , postCategories = []
+  , postTags = []
+  }
+
+postMetadataTests :: TestTree
+postMetadataTests = testGroup "parsePostWith metadata"
+  [ testCase "years and months in local time" $
+      case parsePostWith HTMLReaderCustom Nothing samplePost of
+        Left e -> assertFailure (show e)
+        Right (Pandoc (Meta meta) _) -> do
+          Map.lookup "years" meta @?= Just (MetaList [MetaString "2026"])
+          Map.lookup "months" meta @?= Just (MetaList [MetaString "2026/08"])
+  , testCase "years and months are written as quoted strings" $
+      either (Left . show) Right (parsePostWith HTMLReaderCustom Nothing samplePost >>= renderCommonMark False) @?=
+        Right (T.unlines
+          [ "---"
+          , "date: \"2026-08-01T00:30:00+09:00\""
+          , "slug: hello"
+          , "title: Title"
+          , "wp_id: 42"
+          , "years: [\"2026\"]"
+          , "months: [\"2026/08\"]"
+          , "---"
+          , ""
+          , "Hello"
+          ])
+  , testCase "no years and months without date" $
+      case parsePostWith HTMLReaderCustom Nothing samplePost { postDate = Nothing } of
+        Left e -> assertFailure (show e)
+        Right (Pandoc (Meta meta) _) -> do
+          Map.lookup "years" meta @?= Nothing
+          Map.lookup "months" meta @?= Nothing
   ]
