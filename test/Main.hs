@@ -19,7 +19,8 @@ import           WXR2Pandoc.Filter (hoistMathPreamble, mathPreambleDefinitions,
 import           WXR2Pandoc.ParseHTML (parseWpHtml)
 import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    mathDelimitersToEntities, parsePostWith,
-                                   renderCommonMark)
+                                   relativizeSiteUrls, renderCommonMark,
+                                   siteRelativeUrl)
 import           WXR2Pandoc.WXR (Post (..), PostType (..))
 
 main :: IO ()
@@ -46,6 +47,7 @@ tests = testGroup "WXR2Pandoc"
   , hoistMathPreambleTests
   , mathDelimitersToEntitiesTests
   , postMetadataTests
+  , relativizeSiteUrlsTests
   ]
 
 -- | Helper to create Pandoc with blocks
@@ -772,3 +774,40 @@ postMetadataTests = testGroup "parsePostWith metadata"
           Map.lookup "years" meta @?= Nothing
           Map.lookup "months" meta @?= Nothing
   ]
+
+relativizeSiteUrlsTests :: TestTree
+relativizeSiteUrlsTests = testGroup "relativizeSiteUrls"
+  [ testCase "page URL with query and fragment" $
+      siteRelativeUrl base "https://blog.example.com/2026/07/hello/?a=1#sec" @?= Just ("/2026/07/hello/?a=1#sec", False)
+  , testCase "http is the same site" $
+      siteRelativeUrl base "http://blog.example.com/2026/07/hello/" @?= Just ("/2026/07/hello/", False)
+  , testCase "top page" $
+      siteRelativeUrl base "https://blog.example.com" @?= Just ("/", False)
+  , testCase "media" $
+      siteRelativeUrl base "https://blog.example.com/wp-content/uploads/a.jpg" @?= Just ("/wp-content/uploads/a.jpg", True)
+  , testCase "other hosts" $ do
+      siteRelativeUrl base "https://example.com/2026/07/hello/" @?= Nothing
+      siteRelativeUrl base "https://blog.example.com:8080/2026/07/hello/" @?= Nothing
+  , testCase "outside the base path" $
+      siteRelativeUrl "https://example.com/blog/" "https://example.com/other/" @?= Nothing
+  , testCase "links, images and raw HTML" $
+      relativizeSiteUrls False base (doc [Para
+        [ Link nullAttr [RawInline (Format "html") "<img src=\"https://blog.example.com/wp-content/uploads/a.jpg\" />"] ("https://blog.example.com/wp-content/uploads/a.jpg", "")
+        , Link nullAttr [Str "post"] ("https://blog.example.com/2026/07/hello/", "")
+        , Link nullAttr [Str "other"] ("https://example.com/", "")
+        , RawInline (Format "html") "<a href=\"https://blog.example.com/2026/07/hello/\">"
+        ]]) @?=
+      doc [Para
+        [ Link nullAttr [RawInline (Format "html") "<img src=\"https://blog.example.com/wp-content/uploads/a.jpg\" />"] ("https://blog.example.com/wp-content/uploads/a.jpg", "")
+        , Link nullAttr [Str "post"] ("/2026/07/hello/", "")
+        , Link nullAttr [Str "other"] ("https://example.com/", "")
+        , RawInline (Format "html") "<a href=\"/2026/07/hello/\">"
+        ]]
+  , testCase "media and images metadata with includeMedia" $
+      relativizeSiteUrls True base (Pandoc (Meta (Map.singleton "images" (MetaList [MetaString "https://blog.example.com/wp-content/uploads/a.jpg"])))
+        [Para [Image nullAttr [] ("https://blog.example.com/wp-content/uploads/a.jpg", ""), RawInline (Format "html") "<img src=\"https://blog.example.com/wp-content/uploads/a.jpg\" />"]]) @?=
+      Pandoc (Meta (Map.singleton "images" (MetaList [MetaString "/wp-content/uploads/a.jpg"])))
+        [Para [Image nullAttr [] ("/wp-content/uploads/a.jpg", ""), RawInline (Format "html") "<img src=\"/wp-content/uploads/a.jpg\" />"]]
+  ]
+  where
+    base = "https://blog.example.com/"

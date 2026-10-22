@@ -9,19 +9,24 @@ module WXR2Pandoc.Write
   , mathDelimitersToEntities
   , writePandocJSONFile
   , makeRelativeUrl
+  , siteRelativeUrl
+  , relativizeSiteUrls
   , expandOutputPath
   , categoryIndexContent
   ) where
 import qualified Data.Aeson as JSON
 import qualified Data.ByteString as BS
-import           Data.List (stripPrefix)
+import           Control.Applicative ((<|>))
+import           Control.Monad (guard)
+import           Data.List (isPrefixOf, stripPrefix)
 import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Time (LocalTime (..), ZonedTime (..), toGregorian)
 import           Data.Time.Format.ISO8601
-import           Network.URI (URI (..), parseAbsoluteURI)
+import           Network.URI (URI (..), URIAuth (..), parseAbsoluteURI,
+                                      parseURI)
 import           Text.Pandoc.Class (runPure)
 import           Text.Pandoc.Definition as P
 import qualified Text.Pandoc.Error as P
@@ -99,6 +104,48 @@ makeRelativeUrl baseUrl url = do
                       _        -> relativePath
       pure $ T.pack trimmed
     else Nothing
+
+-- | Root-relative URL like @/2026/07/hello/@ for an absolute URL into the site,
+-- along with whether it is a media file (under @wp-content/@).
+-- http and https are not distinguished.
+-- Example: siteRelativeUrl "https://blog.example.com/" "http://blog.example.com/great-article/#a" = Just ("/great-article/#a", False)
+siteRelativeUrl :: T.Text -> T.Text -> Maybe (T.Text, Bool)
+siteRelativeUrl baseUrl url = do
+  baseUri <- parseAbsoluteURI (T.unpack baseUrl)
+  targetUri <- parseURI (T.unpack url) -- parseAbsoluteURI rejects fragments
+  guard $ uriScheme targetUri `elem` ["http:", "https:"]
+  baseAuth <- uriAuthority baseUri
+  targetAuth <- uriAuthority targetUri
+  guard $ uriRegName baseAuth == uriRegName targetAuth && uriPort baseAuth == uriPort targetAuth && null (uriUserInfo targetAuth)
+  let basePath = case uriPath baseUri of
+                   "" -> "/"
+                   p  -> p
+      targetPath = case uriPath targetUri of
+                     "" -> "/"
+                     p  -> p
+  rest <- stripPrefix basePath targetPath <|> (if targetPath ++ "/" == basePath then Just "" else Nothing)
+  pure (T.pack (targetPath ++ uriQuery targetUri ++ uriFragment targetUri), "wp-content/" `isPrefixOf` rest)
+
+-- | Rewrite absolute URLs into the site (see 'siteRelativeUrl') as root-relative URLs,
+-- in links, images, attributes in raw HTML and the @images@ metadata.
+-- URLs of media files are rewritten only if the first argument is True.
+relativizeSiteUrls :: Bool -> T.Text -> Pandoc -> Pandoc
+relativizeSiteUrls includeMedia baseUrl (Pandoc (Meta meta) body) =
+  Pandoc (Meta (Map.adjust images "images" meta)) (P.walk block (P.walk inline body))
+  where
+    rewrite url = case siteRelativeUrl baseUrl url of
+                    Just (rel, isMedia) | includeMedia || not isMedia -> rel
+                    _ -> url
+    images (MetaList xs) = MetaList [case x of MetaString u -> MetaString (rewrite u); _ -> x | x <- xs]
+    images v = v
+    inline (Link attr ils (url, title))  = Link attr ils (rewrite url, title)
+    inline (Image attr ils (url, title)) = Image attr ils (rewrite url, title)
+    inline (RawInline f@(Format "html") s) = RawInline f (rawHtml s)
+    inline x = x
+    block (RawBlock f@(Format "html") s) = RawBlock f (rawHtml s)
+    block x = x
+    -- Rewrite double-quoted attribute values consisting of a URL
+    rawHtml = T.intercalate "\"" . zipWith (\i t -> if odd (i :: Int) then rewrite t else t) [0..] . T.splitOn "\""
 
 parseWpHtmlWith :: HTMLReader -> T.Text -> Either P.PandocError Pandoc
 parseWpHtmlWith HTMLReaderPandoc content = fmap wpHtmlFilter . runPure $ readHtml readerOptions content
