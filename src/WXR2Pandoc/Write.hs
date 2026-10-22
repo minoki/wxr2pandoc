@@ -128,8 +128,15 @@ writeCommonMarkFile path doc = do
     let tpl = case tplResult of
                 Left e  -> error e
                 Right t -> t
-    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ P.walk unparseShortcode doc
+    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ P.walk unparseShortcode doc
   BS.writeFile path $ T.encodeUtf8 content
+
+-- | Keep the mathPreamble metadata (TeX code) from being escaped as Markdown
+rawMathPreamble :: Pandoc -> Pandoc
+rawMathPreamble (Pandoc (Meta meta) body) = Pandoc (Meta (Map.adjust toRaw "mathPreamble" meta)) body
+  where
+    toRaw (MetaString s) = MetaBlocks [RawBlock (Format "commonmark") s]
+    toRaw v              = v
 
 writePandocJSONFile :: FilePath -> Pandoc -> IO ()
 writePandocJSONFile path doc = do

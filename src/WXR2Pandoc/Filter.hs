@@ -5,6 +5,7 @@ import qualified Data.Aeson as JSON
 import qualified Data.Attoparsec.Text as A
 import           Data.Char (isDigit, isLetter)
 import           Data.List
+import           Data.Maybe (catMaybes)
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import           Text.Pandoc.Definition as P
@@ -200,3 +201,53 @@ wpBasicHtmlFilter = P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMa
 unparseShortcode :: Inline -> Inline
 unparseShortcode (RawInline (P.Format "wordpress") content) = Str content
 unparseShortcode inl = inl
+
+-- | If the math consists only of macro definitions
+-- (@\\newcommand@, @\\renewcommand@, @\\providecommand@, @\\def@),
+-- return them. @\\require{...}@ (MathJax extensions) is also allowed and dropped.
+mathPreambleDefinitions :: T.Text -> Maybe [T.Text]
+mathPreambleDefinitions content = case A.parseOnly (A.skipSpace *> many (itemP <* A.skipSpace) <* A.endOfInput) content of
+    Right items | defs@(_:_) <- catMaybes items -> Just defs
+    _ -> Nothing
+  where
+    itemP = (Just . fst <$> A.match (newcommandP <|> defP)) <|> (Nothing <$ requireP)
+    newcommandP = do
+      _ <- A.string "\\newcommand" <|> A.string "\\renewcommand" <|> A.string "\\providecommand"
+      _ <- optional (A.char '*')
+      A.skipSpace
+      _ <- (A.char '{' *> A.skipSpace *> csNameP <* A.skipSpace <* A.char '}') <|> csNameP
+      A.skipSpace
+      _ <- optional (A.char '[' *> A.takeWhile1 isDigit *> A.char ']' *> A.skipSpace)
+      _ <- optional (A.char '[' *> A.takeWhile (/= ']') *> A.char ']' *> A.skipSpace)
+      groupP
+    defP = do
+      _ <- A.string "\\def"
+      A.skipSpace
+      _ <- csNameP
+      _ <- A.takeWhile (\c -> c == '#' || isDigit c)
+      groupP
+    requireP = A.string "\\require" *> A.skipSpace *> groupP
+    csNameP = A.char '\\' *> (A.takeWhile1 isLetter <|> (T.singleton <$> A.anyChar))
+    groupP = A.char '{' *> A.skipMany (escapedP <|> groupP <|> A.skip (\c -> c /= '{' && c /= '}' && c /= '\\')) <* A.char '}'
+    escapedP = A.char '\\' *> A.skip (const True)
+
+-- | Move the math consisting only of macro definitions to the @mathPreamble@ metadata.
+-- Hidden spans (@display:none@) that become empty are removed as well.
+hoistMathPreamble :: Pandoc -> Pandoc
+hoistMathPreamble (Pandoc meta blocks)
+  | null defs = Pandoc meta blocks
+  | otherwise = Pandoc (Meta (Map.insert "mathPreamble" (MetaString (T.unlines defs)) (unMeta meta)))
+                       (P.walk stripEmptyPara $ P.walk stripEmptyHiddenSpan $ P.walk (concatMap removeMath) blocks)
+  where
+    defs = nub $ P.query collect blocks
+    collect (Math _ s) | Just ds <- mathPreambleDefinitions s = ds
+    collect _ = []
+    removeMath (Math _ s) | Just _ <- mathPreambleDefinitions s = []
+    removeMath inl = [inl]
+    isHidden style = "display:none" `T.isInfixOf` T.filter (/= ' ') style
+    stripEmptyHiddenSpan (RawInline (P.Format "html") open : RawInline (P.Format "html") "</span>" : xs)
+      | "<span" `T.isPrefixOf` open, isHidden open = stripEmptyHiddenSpan xs
+    stripEmptyHiddenSpan (Span (_, _, kv) [] : xs)
+      | Just style <- Data.List.lookup "style" kv, isHidden style = stripEmptyHiddenSpan xs
+    stripEmptyHiddenSpan (x : xs) = x : stripEmptyHiddenSpan xs
+    stripEmptyHiddenSpan [] = []

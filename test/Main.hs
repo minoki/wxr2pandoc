@@ -4,6 +4,7 @@ module Main (main) where
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
+import qualified Data.Map as Map
 import qualified Data.Text as T
 import           Text.Pandoc.Class (runPure)
 import           Text.Pandoc.Definition
@@ -11,7 +12,8 @@ import           Text.Pandoc.Extensions
 import           Text.Pandoc.Options (ReaderOptions (..), def)
 import           Text.Pandoc.Readers.HTML (readHtml)
 
-import           WXR2Pandoc.Filter (wpHtmlFilter)
+import           WXR2Pandoc.Filter (hoistMathPreamble, mathPreambleDefinitions,
+                                    wpHtmlFilter)
 import           WXR2Pandoc.ParseHTML (parseWpHtml)
 
 main :: IO ()
@@ -35,6 +37,7 @@ tests = testGroup "WXR2Pandoc"
     , pandocFilterTests
     , pandocShortcodeTests
     ]
+  , hoistMathPreambleTests
   ]
 
 -- | Helper to create Pandoc with blocks
@@ -600,4 +603,42 @@ pandocShortcodeTests = testGroup "Shortcodes"
   , testCase "shortcode inside <a>" $
       parsePandoc "<p><a href=\"http://www.example.com/\">Hello [TeX-logo]</a></p>" @?=
         doc [Para [Link ("", [], []) [Str "Hello", Space, Span ("", ["TeX-logo"], []) [Str "TeX"]] ("http://www.example.com/", "")]]
+  ]
+
+-- | Pandoc with the mathPreamble metadata
+docWithPreamble :: T.Text -> [Block] -> Pandoc
+docWithPreamble preamble = Pandoc (Meta (Map.singleton "mathPreamble" (MetaString preamble)))
+
+hoistMathPreambleTests :: TestTree
+hoistMathPreambleTests = testGroup "hoistMathPreamble"
+  [ testCase "definitions only" $
+      mathPreambleDefinitions "\\def\\Real{\\mathbf{R}} \\newcommand{\\abs}[1]{\\left|#1\\right|}\\renewcommand\\Re{\\operatorname{Re}}\\newcommand{\\f}[2][x]{#1^{#2}}\\def\\pair#1#2{(#1,#2)}" @?=
+        Just [ "\\def\\Real{\\mathbf{R}}"
+             , "\\newcommand{\\abs}[1]{\\left|#1\\right|}"
+             , "\\renewcommand\\Re{\\operatorname{Re}}"
+             , "\\newcommand{\\f}[2][x]{#1^{#2}}"
+             , "\\def\\pair#1#2{(#1,#2)}"
+             ]
+  , testCase "\\require is dropped" $
+      mathPreambleDefinitions "\\require{AMScd}\\def\\Real{\\mathbf{R}}" @?= Just ["\\def\\Real{\\mathbf{R}}"]
+  , testCase "nested braces and escaped braces" $
+      mathPreambleDefinitions "\\newcommand{\\set}[1]{\\{#1\\}}\\newcommand{\\t}[1]{{#1}^T}" @?=
+        Just ["\\newcommand{\\set}[1]{\\{#1\\}}", "\\newcommand{\\t}[1]{{#1}^T}"]
+  , testCase "definition followed by other math" $
+      mathPreambleDefinitions "\\def\\Complex{\\mathbf{C}}\\Complex" @?= Nothing
+  , testCase "\\require only" $
+      mathPreambleDefinitions "\\require{AMScd}" @?= Nothing
+  , testCase "ordinary math" $
+      mathPreambleDefinitions "x^2" @?= Nothing
+  , testCase "hidden span is removed (Pandoc reader)" $
+      hoistMathPreamble (parsePandoc "<p><span style=\"display: none;\">\\(\\def\\Real{\\mathbf{R}}\\)</span>Hello \\(\\Real\\)</p>") @?=
+        docWithPreamble "\\def\\Real{\\mathbf{R}}\n" [Para [Str "Hello", Space, Math InlineMath "\\Real"]]
+  , testCase "hidden span is removed (custom parser)" $
+      hoistMathPreamble (parseWpHtml "<p><span style=\"display: none;\">\\(\\def\\Real{\\mathbf{R}}\\)</span>Hello \\(\\Real\\)</p>") @?=
+        docWithPreamble "\\def\\Real{\\mathbf{R}}\n" [Para [Str "Hello", Space, Math InlineMath "\\Real"]]
+  , testCase "multiple definitions are concatenated" $
+      hoistMathPreamble (parsePandoc "<p>\\(\\def\\A{a}\\)A</p><p>\\(\\def\\B{b}\\)</p><p>B</p>") @?=
+        docWithPreamble "\\def\\A{a}\n\\def\\B{b}\n" [Para [Str "A"], Para [Str "B"]]
+  , testCase "no definitions" $
+      hoistMathPreamble (parsePandoc "<p>\\(x\\)</p>") @?= doc [Para [Math InlineMath "x"]]
   ]

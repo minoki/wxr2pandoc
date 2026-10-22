@@ -46,6 +46,7 @@ import           System.Directory
 import           System.FilePath (takeDirectory, (</>))
 import           System.IO
 import qualified Text.Pandoc.Error as P
+import           WXR2Pandoc.Filter (hoistMathPreamble)
 import           WXR2Pandoc.Write
 import           WXR2Pandoc.WXR (Category (..), Item (..), Post (..), postName,
                                  processCategories, processFile)
@@ -64,6 +65,7 @@ data ConvertAllOptions = ConvertAllOptions
   , caOutputRaw  :: Bool
   , caOutputJson :: Bool
   , caHtmlReader :: HTMLReader
+  , caHoistMathPreamble :: Bool
   , caInputXml   :: String
   }
 
@@ -90,6 +92,7 @@ convertAllOptions = ConvertAllOptions
   <*> OA.switch (OA.long "raw" <> OA.help "Also emit the raw HTML content as .txt")
   <*> OA.switch (OA.long "pandoc-json" <> OA.help "Also emit the Pandoc AST as .json")
   <*> OA.flag HTMLReaderPandoc HTMLReaderCustom (OA.long "custom-parser" <> OA.help "Use custom HTML parser instead of Pandoc")
+  <*> OA.switch (OA.long "hoist-math-preamble" <> OA.help "Move math consisting only of macro definitions (\\newcommand, \\def, etc.) to the 'mathPreamble' metadata")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 downloadMediaOptions :: OA.Parser DownloadMediaOptions
@@ -215,7 +218,8 @@ runConvertAll ConvertAllOptions {..} = do
     ItemPost p -> do
       case parsePostWith caHtmlReader caBaseUrl p of
         Left e -> hPutStrLn stderr $ "Error: " ++ T.unpack (P.renderError e) ++ " while reading " ++ T.unpack (postName p)
-        Right doc -> do
+        Right doc0 -> do
+          let doc = if caHoistMathPreamble then hoistMathPreamble doc0 else doc0
           let getOutputPath ext = case caOutputPath of
                 Just tpl -> caOutputDir ++ "/" ++ T.unpack (expandOutputPath tpl caBaseUrl p ext)
                 Nothing  -> caOutputDir ++ "/" ++ show (postId p) ++ "-" ++ T.unpack (postName p) ++ "." ++ T.unpack ext
