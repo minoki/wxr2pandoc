@@ -12,6 +12,7 @@ import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
 import           Data.Time
+import           Network.URI (unEscapeString)
 import qualified Text.XML as XC
 import qualified Text.XML.Cursor as XC
 
@@ -31,7 +32,7 @@ data Post = Post { postType         :: PostType
                  , postModifiedDate :: Maybe ZonedTime
                  , postName         :: T.Text
                  , postStatus       :: T.Text -- publish, draft, inherit
-                 , postCategories   :: [T.Text]
+                 , postCategories   :: [T.Text] -- slugs (nicename)
                  , postTags         :: [T.Text]
                  }
           deriving (Show)
@@ -56,6 +57,11 @@ computeZonedTime (Just local) (Just gmt) =
 computeZonedTime (Just local) Nothing =
   Just $ ZonedTime local utc
 computeZonedTime Nothing _ = Nothing
+
+-- | Decode a percent-encoded slug like @%e9%89%84%e9%81%93@.
+-- 'unEscapeString' also decodes UTF-8.
+decodeSlug :: T.Text -> T.Text
+decodeSlug = T.pack . unEscapeString . T.unpack
 
 processFile :: FilePath -> IO [Item]
 processFile filename = do
@@ -100,7 +106,11 @@ processFile filename = do
     let isTag (XC.Element _ attrs _) = case Map.lookup (XC.Name "domain" Nothing Nothing) attrs of
                                               Just "post_tag" -> True
                                               _               -> False
-    let categories = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isCategory >=> XC.child >=> XC.content
+    -- Use the slug (nicename) rather than the display name, falling back to the latter
+    let categorySlug c = case XC.attribute (XC.Name "nicename" Nothing Nothing) c of
+                           slug:_ -> [decodeSlug slug]
+                           []     -> XC.child c >>= XC.content
+    let categories = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isCategory >=> categorySlug
     let tags = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isTag >=> XC.child >=> XC.content
     -- <wp:comment>...</wp:comment>
     -- print (title, link_content, pubDate_p, creator, post_name, post_id)
