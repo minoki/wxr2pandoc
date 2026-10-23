@@ -18,6 +18,7 @@ module WXR2Pandoc.Write
   , youtubeEmbedsToShortcode
   , youtubeVideo
   , tweetEmbedsToHtml
+  , tableMathToShortcode
   , tweetUrl
   , expandOutputPath
   , categoryIndexContent
@@ -261,6 +262,19 @@ tweetEmbedsToHtml oembeds = P.walk go
       where needle = "/status/" <> tweetId
     -- A blank line would end the HTML block in CommonMark
     removeBlankLines = T.intercalate "\n" . filter (not . T.all isSpace) . T.lines
+
+-- | Write math in tables as Hugo shortcodes @{{< math >}}TeX{{< /math >}}@
+-- (@{{< math display >}}@ for display math).
+-- Tables are written as raw HTML, where Hugo's passthrough extension does not find math,
+-- while shortcodes are expanded anywhere.
+tableMathToShortcode :: Pandoc -> Pandoc
+tableMathToShortcode = P.walk table
+  where
+    table t@(Table {}) = P.walk math t
+    table b = b
+    math (Math InlineMath s)  = RawInline (Format "html") ("{{< math >}}" <> s <> "{{< /math >}}")
+    math (Math DisplayMath s) = RawInline (Format "html") ("{{< math display >}}" <> s <> "{{< /math >}}")
+    math x = x
 
 -- | User name and tweet ID of a URL like @https://twitter.com/USER/status/ID@ or @https://x.com/USER/status/ID@
 tweetUrl :: T.Text -> Maybe (T.Text, T.Text)

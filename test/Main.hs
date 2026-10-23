@@ -24,7 +24,8 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    separateCodeBlockFromMore,
                                    siteEmbedsToShortcode, siteRelativeUrl,
                                    unflankedEmphasisToHtml, urlRewriterContent,
-                                   tweetEmbedsToHtml, tweetUrl,
+                                   tableMathToShortcode, tweetEmbedsToHtml,
+                                   tweetUrl,
                                    youtubeEmbedsToShortcode, youtubeVideo)
 import           WXR2Pandoc.WXR (Post (..), PostType (..))
 
@@ -58,6 +59,7 @@ tests = testGroup "WXR2Pandoc"
   , siteEmbedsToShortcodeTests
   , youtubeEmbedsToShortcodeTests
   , tweetEmbedsToHtmlTests
+  , tableMathToShortcodeTests
   , urlRewriterContentTests
   ]
 
@@ -961,6 +963,25 @@ youtubeEmbedsToShortcodeTests = testGroup "youtubeEmbedsToShortcode"
     caption = Caption Nothing [Plain [Str "video"]]
     wrapper url = Div ("", ["wp-block-embed__wrapper"], []) [Plain [SoftBreak, Str url, SoftBreak]]
     embed url = Figure ("", ["wp-block-embed", "is-provider-youtube"], []) (Caption Nothing []) [wrapper url]
+
+tableMathToShortcodeTests :: TestTree
+tableMathToShortcodeTests = testGroup "tableMathToShortcode"
+  [ testCase "math in a table" $
+      either (Left . show) Right (renderCommonMark False (tableMathToShortcode (doc [table [Math InlineMath "a&b<c", Math DisplayMath "x"]]))) @?=
+        Right (T.unlines
+          [ "<table>"
+          , "<tbody>"
+          , "<tr>"
+          , "<td>{{< math >}}a&b<c{{< /math >}}{{< math display >}}x{{< /math >}}</td>"
+          , "</tr>"
+          , "</tbody>"
+          , "</table>" ])
+  , testCase "math outside tables is kept" $
+      tableMathToShortcode (doc [Para [Math InlineMath "x"]]) @?= doc [Para [Math InlineMath "x"]]
+  ]
+  where
+    table inls = Table nullAttr (Caption Nothing []) [(AlignDefault, ColWidthDefault)] (TableHead nullAttr [])
+                   [TableBody nullAttr 0 [] [Row nullAttr [Cell nullAttr AlignDefault 1 1 [Plain inls]]]] (TableFoot nullAttr [])
 
 tweetEmbedsToHtmlTests :: TestTree
 tweetEmbedsToHtmlTests = testGroup "tweetEmbedsToHtml"
