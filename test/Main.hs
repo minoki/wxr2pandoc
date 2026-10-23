@@ -23,7 +23,8 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    relativizeSiteUrls, renderCommonMark,
                                    separateCodeBlockFromMore,
                                    siteEmbedsToShortcode, siteRelativeUrl,
-                                   unflankedEmphasisToHtml, urlRewriterContent)
+                                   unflankedEmphasisToHtml, urlRewriterContent,
+                                   youtubeEmbedsToShortcode, youtubeVideo)
 import           WXR2Pandoc.WXR (Post (..), PostType (..))
 
 main :: IO ()
@@ -54,6 +55,7 @@ tests = testGroup "WXR2Pandoc"
   , postMetadataTests
   , relativizeSiteUrlsTests
   , siteEmbedsToShortcodeTests
+  , youtubeEmbedsToShortcodeTests
   , urlRewriterContentTests
   ]
 
@@ -932,6 +934,30 @@ siteEmbedsToShortcodeTests = testGroup "siteEmbedsToShortcode"
     base = "https://blog.example.com/"
     embed url = Figure ("", ["wp-block-embed", "is-type-wp-embed"], []) (Caption Nothing [])
       [Div ("", ["wp-block-embed__wrapper"], []) [Plain [SoftBreak, Str url, SoftBreak]]]
+
+youtubeEmbedsToShortcodeTests :: TestTree
+youtubeEmbedsToShortcodeTests = testGroup "youtubeEmbedsToShortcode"
+  [ testCase "video URLs" $ do
+      youtubeVideo "https://www.youtube.com/watch?v=dFkF8kgl3bA" @?= Just ("dFkF8kgl3bA", Nothing)
+      youtubeVideo "https://youtu.be/A06YDtBLEmE" @?= Just ("A06YDtBLEmE", Nothing)
+      youtubeVideo "https://www.youtube.com/embed/x_y-z?start=90" @?= Just ("x_y-z", Just 90)
+      youtubeVideo "https://youtu.be/abc?t=1h2m3s" @?= Just ("abc", Just 3723)
+  , testCase "other URLs" $ do
+      youtubeVideo "https://www.youtube.com/channel/abc" @?= Nothing
+      youtubeVideo "https://example.com/watch?v=abc" @?= Nothing
+  , testCase "embed with a start time" $
+      either (Left . show) Right (renderCommonMark False (youtubeEmbedsToShortcode (doc [embed "https://www.youtube.com/watch?v=8B4VrU_Jch8&t=10253s"]))) @?=
+        Right "{{< youtube id=\"8B4VrU_Jch8\" start=\"10253\" >}}\n"
+  , testCase "caption is kept" $
+      youtubeEmbedsToShortcode (doc [Figure ("", ["wp-block-embed"], []) caption [wrapper "https://youtu.be/abc"]]) @?=
+        doc [Figure ("", ["wp-block-embed"], []) caption [RawBlock (Format "commonmark") "{{< youtube id=\"abc\" >}}"]]
+  , testCase "embeds of other sites are kept" $
+      youtubeEmbedsToShortcode (doc [embed "https://twitter.com/a/status/1"]) @?= doc [embed "https://twitter.com/a/status/1"]
+  ]
+  where
+    caption = Caption Nothing [Plain [Str "video"]]
+    wrapper url = Div ("", ["wp-block-embed__wrapper"], []) [Plain [SoftBreak, Str url, SoftBreak]]
+    embed url = Figure ("", ["wp-block-embed", "is-provider-youtube"], []) (Caption Nothing []) [wrapper url]
 
 urlRewriterContentTests :: TestTree
 urlRewriterContentTests = testGroup "urlRewriterContent"

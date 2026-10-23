@@ -15,6 +15,8 @@ module WXR2Pandoc.Write
   , relativizeSiteUrls
   , permalinkPaths
   , siteEmbedsToShortcode
+  , youtubeEmbedsToShortcode
+  , youtubeVideo
   , expandOutputPath
   , categoryIndexContent
   , urlRewriterContent
@@ -23,7 +25,8 @@ import qualified Data.Aeson as JSON
 import qualified Data.ByteString as BS
 import           Control.Applicative ((<|>))
 import           Control.Monad (guard)
-import           Data.Char (isDigit, isPunctuation, isSpace, isSymbol)
+import           Data.Char (isAlphaNum, isDigit, isPunctuation, isSpace,
+                                      isSymbol)
 import           Data.List (isPrefixOf, stripPrefix)
 import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe, maybeToList)
@@ -211,6 +214,63 @@ siteEmbedsToShortcode name baseUrl = P.walk go
       , Just (rel, False) <- siteRelativeUrl baseUrl url
       = RawBlock (Format "commonmark") ("{{< " <> name <> " " <> jsonString rel <> " >}}")
     go b = b
+
+-- | Replace YouTube embed blocks (@wp-block-embed@) with Hugo's built-in shortcode
+-- like @{{< youtube id="ID" start="10" >}}@.
+-- Text of the embed would otherwise be HTML-escaped inside the figure,
+-- and Hugo's autolinks take @&amp;@ in the URL literally.
+youtubeEmbedsToShortcode :: Pandoc -> Pandoc
+youtubeEmbedsToShortcode = P.walk go
+  where
+    go (Figure attr@(_, classes, _) caption [Div (_, ["wp-block-embed__wrapper"], _) [Plain inls]])
+      | "wp-block-embed" `elem` classes
+      , [Str url] <- filter (`notElem` [SoftBreak, Space, LineBreak]) inls
+      , Just (videoId, start) <- youtubeVideo url
+      , let shortcode = RawBlock (Format "commonmark") $
+                          "{{< youtube id=" <> jsonString videoId
+                          <> maybe "" (\n -> " start=" <> jsonString (T.pack (show n))) start <> " >}}"
+      = case caption of
+          Caption Nothing [] -> shortcode
+          _                  -> Figure attr caption [shortcode]
+    go b = b
+
+-- | Video ID and start time (in seconds) of a YouTube URL like
+-- @https://www.youtube.com/watch?v=ID&t=10s@ or @https://youtu.be/ID?t=1m30s@
+youtubeVideo :: T.Text -> Maybe (T.Text, Maybe Int)
+youtubeVideo url = do
+  uri <- parseAbsoluteURI (T.unpack url)
+  guard $ uriScheme uri `elem` ["http:", "https:"]
+  auth <- uriAuthority uri
+  let host = T.toLower (T.pack (uriRegName auth))
+      path = T.pack (uriPath uri)
+      params = [ (k, T.drop 1 v)
+               | param <- T.splitOn "&" (T.drop 1 (T.pack (uriQuery uri)))
+               , let (k, v) = T.breakOn "=" param ]
+  videoId <- if host == "youtu.be"
+               then T.stripPrefix "/" path
+               else do
+                 guard $ host `elem` ["youtube.com", "www.youtube.com", "m.youtube.com"]
+                 if path == "/watch"
+                   then lookup "v" params
+                   else T.stripPrefix "/embed/" path <|> T.stripPrefix "/shorts/" path
+  guard $ not (T.null videoId) && T.all (\c -> isAlphaNum c || c == '-' || c == '_') videoId
+  let start = do t <- lookup "t" params <|> lookup "start" params
+                 n <- seconds t
+                 n <$ guard (n > 0)
+  pure (videoId, start)
+  where
+    -- @90@, @90s@ or @1h2m3s@
+    seconds t | T.all isDigit t, not (T.null t) = Just (read (T.unpack t))
+    seconds t = go 0 t
+      where
+        go acc rest
+          | T.null rest = Just acc
+          | otherwise = do
+              let (digits, rest') = T.span isDigit rest
+              guard $ not (T.null digits)
+              (unit, rest'') <- T.uncons rest'
+              factor <- lookup unit [('h', 3600), ('m', 60), ('s', 1)]
+              go (acc + read (T.unpack digits) * factor) rest''
 
 parseWpHtmlWith :: HTMLReader -> T.Text -> Either P.PandocError Pandoc
 parseWpHtmlWith HTMLReaderPandoc content = fmap wpHtmlFilter . runPure $ readHtml readerOptions content
