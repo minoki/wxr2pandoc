@@ -786,6 +786,12 @@ postMetadataTests = testGroup "parsePostWith metadata"
         Right (Pandoc (Meta meta) _) -> do
           Map.lookup "years" meta @?= Nothing
           Map.lookup "months" meta @?= Nothing
+  , testCase "no years and months for pages" $
+      case parsePostWith HTMLReaderCustom Nothing samplePost { postType = TypePage } of
+        Left e -> assertFailure (show e)
+        Right (Pandoc (Meta meta) _) -> do
+          Map.lookup "years" meta @?= Nothing
+          Map.lookup "months" meta @?= Nothing
   ]
 
 relativizeSiteUrlsTests :: TestTree

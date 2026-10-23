@@ -183,10 +183,11 @@ parsePostWith reader baseUrl Post{..} = do
                ++ [("slug", MetaString postName) | not (T.null postName)]
                ++ [("draft", MetaBool True) | postStatus == "draft"]
                ++ [("date", MetaString $ T.pack $ iso8601Show pd) | pd <- maybeToList postDate]
-               -- Hugo taxonomies for the date archives (/2026/ and /2026/07/)
+               -- Hugo taxonomies for the date archives (/2026/ and /2026/07/); pages are not listed there
                ++ concat [ [("years", MetaList [MetaString (T.pack y)])
                            ,("months", MetaList [MetaString (T.pack (y ++ "/" ++ m))])]
-                         | (y, m, _) <- maybeToList (postYearMonthDay postDate) ]
+                         | postType == TypePost
+                         , (y, m, _) <- maybeToList (postYearMonthDay postDate) ]
                -- Featured image, shown by the theme above the title
                ++ [("images", MetaList [MetaString t]) | t <- maybeToList postThumbnail]
                ++ [("lastmod", MetaString $ T.pack $ iso8601Show pd) | pd <- maybeToList postModifiedDate]
