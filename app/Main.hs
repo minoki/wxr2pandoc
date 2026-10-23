@@ -97,7 +97,7 @@ data GenerateUrlRewriterOptions = GenerateUrlRewriterOptions
 
 convertAllOptions :: OA.Parser ConvertAllOptions
 convertAllOptions = ConvertAllOptions
-  <$> optional (OA.strOption (OA.long "base-url" <> OA.metavar "URL" <> OA.help "Base URL of the blog (e.g. https://blog.example.com/), used to compute relative URLs for {url} and the 'url' metadata, and to rewrite links into the site as root-relative URLs"))
+  <$> optional (OA.strOption (OA.long "base-url" <> OA.metavar "URL" <> OA.help "Base URL of the blog (e.g. https://blog.example.com/), used to compute relative URLs for {url} and the 'url' metadata, and to rewrite links into the site as root-relative URLs (links like /?p=ID as the permalinks)"))
   <*> OA.strOption (OA.long "output" <> OA.metavar "DIR" <> OA.help "Output directory (required)")
   <*> optional (OA.strOption (OA.long "output-path" <> OA.metavar "TEMPLATE" <> OA.help "Output path template relative to DIR, with {url}, {slug}, {year}, {monthnum}, {day}, {post_id}, {ext} (default: {post_id}-{slug}.{ext})"))
   <*> OA.switch (OA.long "raw" <> OA.help "Also emit the raw HTML content as .txt")
@@ -257,12 +257,13 @@ main = do
 runConvertAll :: Maybe PostType -> ConvertAllOptions -> IO ()
 runConvertAll typ ConvertAllOptions {..} = do
   items <- processFile caInputXml
+  let permalinks = permalinkPaths [p | ItemPost p <- items]
   forM_ items $ \case
     ItemPost p | maybe True (== postType p) typ -> do
       case parsePostWith caHtmlReader caBaseUrl p of
         Left e -> hPutStrLn stderr $ "Error: " ++ T.unpack (P.renderError e) ++ " while reading " ++ T.unpack (postName p)
         Right doc0 -> do
-          let doc = maybe id (relativizeSiteUrls caRelativeMedia) caBaseUrl $
+          let doc = maybe id (relativizeSiteUrls caRelativeMedia permalinks) caBaseUrl $
                     maybe id (uncurry siteEmbedsToShortcode) ((,) <$> caEmbedShortcode <*> caBaseUrl) $
                     if caHoistMathPreamble then hoistMathPreamble doc0 else doc0
           let getOutputPath ext = case caOutputPath of

@@ -19,6 +19,7 @@ import           WXR2Pandoc.Filter (hoistMathPreamble, mathPreambleDefinitions,
 import           WXR2Pandoc.ParseHTML (parseWpHtml)
 import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    mathDelimitersToEntities, parsePostWith,
+                                   permalinkPaths,
                                    relativizeSiteUrls, renderCommonMark,
                                    separateCodeBlockFromMore,
                                    siteEmbedsToShortcode, siteRelativeUrl,
@@ -869,7 +870,7 @@ relativizeSiteUrlsTests = testGroup "relativizeSiteUrls"
   , testCase "outside the base path" $
       siteRelativeUrl "https://example.com/blog/" "https://example.com/other/" @?= Nothing
   , testCase "links, images and raw HTML" $
-      relativizeSiteUrls False base (doc [Para
+      relativizeSiteUrls False Map.empty base (doc [Para
         [ Link nullAttr [RawInline (Format "html") "<img src=\"https://blog.example.com/wp-content/uploads/a.jpg\" />"] ("https://blog.example.com/wp-content/uploads/a.jpg", "")
         , Link nullAttr [Str "post"] ("https://blog.example.com/2026/07/hello/", "")
         , Link nullAttr [Str "other"] ("https://example.com/", "")
@@ -881,8 +882,33 @@ relativizeSiteUrlsTests = testGroup "relativizeSiteUrls"
         , Link nullAttr [Str "other"] ("https://example.com/", "")
         , RawInline (Format "html") "<a href=\"/2026/07/hello/\">"
         ]]
+  , testCase "query URLs of posts as permalinks" $
+      relativizeSiteUrls False (Map.fromList [(42, "/2026/08/hello/"), (7, "/about/")]) base (doc [Para
+        [ Link nullAttr [Str "p"] ("https://blog.example.com/?p=42", "")
+        , Link nullAttr [Str "page_id"] ("http://blog.example.com/index.php?page_id=7#sec", "")
+        , Link nullAttr [Str "relative"] ("/?p=42", "")
+        , Link nullAttr [Str "unknown"] ("https://blog.example.com/?p=1", "")
+        , Link nullAttr [Str "other"] ("https://example.com/?p=42", "")
+        , Link nullAttr [Str "not top"] ("https://blog.example.com/2026/?p=42", "")
+        , RawInline (Format "html") "<a href=\"https://blog.example.com/?p=42\">"
+        ]]) @?=
+      doc [Para
+        [ Link nullAttr [Str "p"] ("/2026/08/hello/", "")
+        , Link nullAttr [Str "page_id"] ("/about/#sec", "")
+        , Link nullAttr [Str "relative"] ("/2026/08/hello/", "")
+        , Link nullAttr [Str "unknown"] ("/?p=1", "")
+        , Link nullAttr [Str "other"] ("https://example.com/?p=42", "")
+        , Link nullAttr [Str "not top"] ("/2026/?p=42", "")
+        , RawInline (Format "html") "<a href=\"/2026/08/hello/\">"
+        ]]
+  , testCase "permalinkPaths" $
+      permalinkPaths
+        [ samplePost
+        , samplePost { postId = 7, postStatus = "draft", postLink = "https://blog.example.com/draft/" }
+        , samplePost { postId = 8, postLink = "https://blog.example.com/?p=8" }
+        ] @?= Map.fromList [(42, "/2026/08/hello/")]
   , testCase "media and images metadata with includeMedia" $
-      relativizeSiteUrls True base (Pandoc (Meta (Map.singleton "images" (MetaList [MetaString "https://blog.example.com/wp-content/uploads/a.jpg"])))
+      relativizeSiteUrls True Map.empty base (Pandoc (Meta (Map.singleton "images" (MetaList [MetaString "https://blog.example.com/wp-content/uploads/a.jpg"])))
         [Para [Image nullAttr [] ("https://blog.example.com/wp-content/uploads/a.jpg", ""), RawInline (Format "html") "<img src=\"https://blog.example.com/wp-content/uploads/a.jpg\" />"]]) @?=
       Pandoc (Meta (Map.singleton "images" (MetaList [MetaString "/wp-content/uploads/a.jpg"])))
         [Para [Image nullAttr [] ("/wp-content/uploads/a.jpg", ""), RawInline (Format "html") "<img src=\"/wp-content/uploads/a.jpg\" />"]]
