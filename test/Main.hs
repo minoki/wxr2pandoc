@@ -152,6 +152,10 @@ inlineTests = testGroup "Inline elements"
       parseWpHtml "<p><a href=\"https://example.com\"><a href=\"https://example.com\">link</a></a></p>" @?=
         doc [Para [Link ("", [], []) [Str "link"] ("https://example.com", "")]]
 
+  , testCase "nested links to different URLs keep the inner one" $
+      parseWpHtml "<p><a href=\"https://example.com/outer\"><a href=\"https://example.com/inner\">link</a></a></p>" @?=
+        doc [Para [Link ("", [], []) [Str "link"] ("https://example.com/inner", "")]]
+
   , testCase "image" $
       parseWpHtml "<p><img src=\"img.png\" alt=\"Alt text\"></p>" @?=
         doc [Para [Image ("", [], []) [Str "Alt text"] ("img.png", "")]]

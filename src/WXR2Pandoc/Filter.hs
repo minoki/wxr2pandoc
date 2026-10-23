@@ -248,10 +248,13 @@ normalizeMathSpace :: Inline -> Inline
 normalizeMathSpace (Math mathType content) = Math mathType (T.replace "\x00A0" " " content)
 normalizeMathSpace inl = inl
 
--- | Collapse a link that consists only of another link to the same URL, e.g. @<a href="u"><a href="u">text</a></a>@
+-- | Collapse a link that consists only of another link, e.g. @<a href="u"><a href="u">text</a></a>@.
+-- If the URLs differ, the inner link is kept: browsers close the outer link at the inner one,
+-- leaving it empty.
 collapseNestedLink :: Inline -> Inline
-collapseNestedLink (Link attr [Link _ content (url', _)] target@(url, _))
+collapseNestedLink (Link attr [Link attr' content target'@(url', _)] target@(url, _))
   | url == url' = Link attr content target
+  | otherwise = Link attr' content target'
 collapseNestedLink inl = inl
 
 wpHtmlFilter :: Pandoc -> Pandoc
