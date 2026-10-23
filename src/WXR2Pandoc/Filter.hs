@@ -230,11 +230,17 @@ normalizeMathSpace :: Inline -> Inline
 normalizeMathSpace (Math mathType content) = Math mathType (T.replace "\x00A0" " " content)
 normalizeMathSpace inl = inl
 
+-- | Collapse a link that consists only of another link to the same URL, e.g. @<a href="u"><a href="u">text</a></a>@
+collapseNestedLink :: Inline -> Inline
+collapseNestedLink (Link attr [Link _ content (url', _)] target@(url, _))
+  | url == url' = Link attr content target
+collapseNestedLink inl = inl
+
 wpHtmlFilter :: Pandoc -> Pandoc
 wpHtmlFilter = P.walk normalizeMathSpace . P.walk unescapeShortcodeInCode . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
 
 wpBasicHtmlFilter :: Pandoc -> Pandoc
-wpBasicHtmlFilter = P.walk normalizeMathSpace . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass
+wpBasicHtmlFilter = P.walk collapseNestedLink . P.walk normalizeMathSpace . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processBlockShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass
 
 unparseShortcode :: Inline -> Inline
 unparseShortcode (RawInline (P.Format "wordpress") content) = Str content
