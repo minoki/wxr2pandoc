@@ -21,7 +21,7 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    mathDelimitersToEntities, parsePostWith,
                                    relativizeSiteUrls, renderCommonMark,
                                    siteEmbedsToShortcode, siteRelativeUrl,
-                                   urlRewriterContent)
+                                   unflankedEmphasisToHtml, urlRewriterContent)
 import           WXR2Pandoc.WXR (Post (..), PostType (..))
 
 main :: IO ()
@@ -47,6 +47,7 @@ tests = testGroup "WXR2Pandoc"
     ]
   , hoistMathPreambleTests
   , mathDelimitersToEntitiesTests
+  , unflankedEmphasisToHtmlTests
   , postMetadataTests
   , relativizeSiteUrlsTests
   , siteEmbedsToShortcodeTests
@@ -719,6 +720,33 @@ mathDelimitersToEntitiesTests = testGroup "mathDelimitersToEntities"
   , testCase "code and math are untouched" $
       mathDelimitersToEntities [Code nullAttr "[$a]", Math InlineMath "[a]"] @?= [Code nullAttr "[$a]", Math InlineMath "[a]"]
   ]
+
+unflankedEmphasisToHtmlTests :: TestTree
+unflankedEmphasisToHtmlTests = testGroup "unflankedEmphasisToHtml"
+  [ testCase "closing delimiter after punctuation followed by a letter" $
+      unflankedEmphasisToHtml [Strong [Str "設計する者は、"], Str "安易に"] @?=
+        [RawInline html "<strong>", Str "設計する者は、", RawInline html "</strong>", Str "安易に"]
+  , testCase "opening delimiter before punctuation preceded by a letter" $
+      unflankedEmphasisToHtml [Str "これは", Emph [Str "「強調」"]] @?=
+        [Str "これは", RawInline html "<em>", Str "「強調」", RawInline html "</em>"]
+  , testCase "punctuation outside is fine" $
+      unflankedEmphasisToHtml [Str "置は「", Strong [Str "あ07"], Str "」です"] @?=
+        [Str "置は「", Strong [Str "あ07"], Str "」です"]
+  , testCase "punctuation on both sides is fine" $
+      unflankedEmphasisToHtml [Str "のか、", Strong [Str "バグが目立つ。"]] @?=
+        [Str "のか、", Strong [Str "バグが目立つ。"]]
+  , testCase "letters on both sides are fine" $
+      unflankedEmphasisToHtml [Str "日本", Strong [Str "語"], Str "です"] @?=
+        [Str "日本", Strong [Str "語"], Str "です"]
+  , testCase "adjacent emphasis" $
+      unflankedEmphasisToHtml [Strong [Str "unboxed", Space, Str "array"], Strong [Str "は相性が悪い"]] @?=
+        [RawInline html "<strong>", Str "unboxed", Space, Str "array", RawInline html "</strong>", Strong [Str "は相性が悪い"]]
+  , testCase "renders as HTML tags" $
+      either (Left . show) Right (renderCommonMark False (doc [Para [Strong [Str "「強調」"], Str "です"]])) @?=
+        Right "<strong>「強調」</strong>です\n"
+  ]
+  where
+    html = Format "html"
 
 -- | A post dated 2026-08-01 00:30 +09:00 (2026-07-31 in UTC)
 samplePost :: Post

@@ -7,6 +7,7 @@ module WXR2Pandoc.Write
   , writeCommonMarkFile
   , renderCommonMark
   , mathDelimitersToEntities
+  , unflankedEmphasisToHtml
   , writePandocJSONFile
   , makeRelativeUrl
   , siteRelativeUrl
@@ -20,6 +21,7 @@ import qualified Data.Aeson as JSON
 import qualified Data.ByteString as BS
 import           Control.Applicative ((<|>))
 import           Control.Monad (guard)
+import           Data.Char (isPunctuation, isSpace, isSymbol)
 import           Data.List (isPrefixOf, stripPrefix)
 import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe, maybeToList)
@@ -214,7 +216,7 @@ renderCommonMark delimiterEntities doc = do
     let tpl = case tplResult of
                 Left e  -> error e
                 Right t -> t
-    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unparseShortcode doc'
+    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unflankedEmphasisToHtml $ P.walk unparseShortcode doc'
   pure $ insertFrontMatter quotedLines content
   where
     (quotedLines, doc') = takeQuotedStringLists doc
@@ -257,6 +259,60 @@ mathDelimitersToEntities = concatMap go
     toInline "]" = RawInline (Format "html") "&rbrack;"
     toInline "$" = RawInline (Format "html") "&dollar;"
     toInline t   = Str t
+
+-- | Character classes that decide whether @*@ can open or close emphasis in CommonMark
+data FlankClass = FlankSpace | FlankPunct | FlankOther
+                deriving (Eq, Show)
+
+flankClass :: Char -> FlankClass
+flankClass c | isSpace c = FlankSpace
+             | isPunctuation c || isSymbol c = FlankPunct
+             | otherwise = FlankOther
+
+-- | Class of the first character of an inline as written in CommonMark
+firstFlankClass :: Inline -> FlankClass
+firstFlankClass (Str s) | Just (c, _) <- T.uncons s = flankClass c
+firstFlankClass P.Space = FlankSpace
+firstFlankClass SoftBreak = FlankSpace
+firstFlankClass LineBreak = FlankSpace -- written as two spaces and a newline
+firstFlankClass (Span attr (x : _)) | attr == nullAttr = firstFlankClass x
+firstFlankClass _ = FlankPunct -- markup such as @*@, @`@, @[@, @\@ or @<@
+
+-- | Class of the last character of an inline as written in CommonMark
+lastFlankClass :: Inline -> FlankClass
+lastFlankClass (Str s) | Just (_, c) <- T.unsnoc s = flankClass c
+lastFlankClass P.Space = FlankSpace
+lastFlankClass SoftBreak = FlankSpace
+lastFlankClass LineBreak = FlankSpace
+lastFlankClass (Span attr xs@(_ : _)) | attr == nullAttr = lastFlankClass (last xs)
+lastFlankClass _ = FlankPunct
+
+-- | Write Strong and Emph as HTML tags where @**@ or @*@ would not be recognized,
+-- e.g. @、**「強調」**です@: a closing @*@ preceded by punctuation must be followed
+-- by whitespace or punctuation (and likewise for an opening one).
+-- The start and end of an inline list are treated as punctuation,
+-- which behaves the same as whitespace for the outer side of a delimiter.
+unflankedEmphasisToHtml :: [Inline] -> [Inline]
+unflankedEmphasisToHtml = go FlankPunct
+  where
+    go before (x : xs) = replace before xs x ++ go (lastFlankClass x) xs
+    go _ [] = []
+    replace before xs (Strong content) | not (flanked before xs content) = tagged "strong" content
+    replace before xs (Emph content) | not (flanked before xs content) = tagged "em" content
+    replace _ _ x = [x]
+    -- Adjacent emphasis would make a single delimiter run like @****@
+    flanked _ (Strong _ : _) _ = False
+    flanked _ (Emph _ : _) _ = False
+    flanked before xs content = flankedBy before (nextClass xs) content
+    nextClass (y : _) = firstFlankClass y
+    nextClass []      = FlankPunct
+    flankedBy _ _ [] = True
+    flankedBy before after content@(c0 : _) =
+      let inFirst = firstFlankClass c0
+          inLast = lastFlankClass (last content)
+      in inFirst /= FlankSpace && (inFirst /= FlankPunct || before /= FlankOther)
+         && inLast /= FlankSpace && (inLast /= FlankPunct || after /= FlankOther)
+    tagged tag content = [RawInline (Format "html") ("<" <> tag <> ">")] ++ content ++ [RawInline (Format "html") ("</" <> tag <> ">")]
 
 -- | Keep the mathPreamble metadata (TeX code) from being escaped as Markdown
 rawMathPreamble :: Pandoc -> Pandoc
