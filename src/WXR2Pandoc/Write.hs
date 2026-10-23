@@ -17,6 +17,8 @@ module WXR2Pandoc.Write
   , siteEmbedsToShortcode
   , youtubeEmbedsToShortcode
   , youtubeVideo
+  , tweetEmbedsToHtml
+  , tweetUrl
   , expandOutputPath
   , categoryIndexContent
   , urlRewriterContent
@@ -233,6 +235,45 @@ youtubeEmbedsToShortcode = P.walk go
           Caption Nothing [] -> shortcode
           _                  -> Figure attr caption [shortcode]
     go b = b
+
+-- | Replace X (Twitter) embed blocks (@wp-block-embed@) with the tweet HTML in the oEmbed cache
+-- of the post (see 'postOembeds'), or with Hugo's built-in shortcode
+-- like @{{< x user="USER" id="ID" >}}@ if the tweet is not cached.
+tweetEmbedsToHtml :: [T.Text] -> Pandoc -> Pandoc
+tweetEmbedsToHtml oembeds = P.walk go
+  where
+    go (Figure attr@(_, classes, _) caption [Div (_, ["wp-block-embed__wrapper"], _) [Plain inls]])
+      | "wp-block-embed" `elem` classes
+      , [Str url] <- filter (`notElem` [SoftBreak, Space, LineBreak]) inls
+      , Just (user, tweetId) <- tweetUrl url
+      , let block = case filter (isCachedTweet tweetId) oembeds of
+                      html : _ -> RawBlock (Format "html") (removeBlankLines html)
+                      [] -> RawBlock (Format "commonmark") ("{{< x user=" <> jsonString user <> " id=" <> jsonString tweetId <> " >}}")
+      = case caption of
+          Caption Nothing [] -> block
+          _                  -> Figure attr caption [block]
+    go b = b
+    -- The cached blockquote links to the tweet like https://twitter.com/USER/status/ID?ref_src=...
+    isCachedTweet tweetId html =
+      "twitter-tweet" `T.isInfixOf` html
+      && any (\(_, rest) -> maybe True (not . isDigit . fst) (T.uncons (T.drop (T.length needle) rest)))
+             (T.breakOnAll needle html)
+      where needle = "/status/" <> tweetId
+    -- A blank line would end the HTML block in CommonMark
+    removeBlankLines = T.intercalate "\n" . filter (not . T.all isSpace) . T.lines
+
+-- | User name and tweet ID of a URL like @https://twitter.com/USER/status/ID@ or @https://x.com/USER/status/ID@
+tweetUrl :: T.Text -> Maybe (T.Text, T.Text)
+tweetUrl url = do
+  uri <- parseAbsoluteURI (T.unpack url)
+  guard $ uriScheme uri `elem` ["http:", "https:"]
+  auth <- uriAuthority uri
+  guard $ T.toLower (T.pack (uriRegName auth)) `elem` ["twitter.com", "www.twitter.com", "mobile.twitter.com", "x.com", "www.x.com"]
+  ["", user, status, tweetId] <- pure $ T.splitOn "/" (T.pack (uriPath uri))
+  guard $ status `elem` ["status", "statuses"]
+  guard $ not (T.null user) && T.all (\c -> isAlphaNum c || c == '_') user
+  guard $ not (T.null tweetId) && T.all isDigit tweetId
+  pure (user, tweetId)
 
 -- | Video ID and start time (in seconds) of a YouTube URL like
 -- @https://www.youtube.com/watch?v=ID&t=10s@ or @https://youtu.be/ID?t=1m30s@

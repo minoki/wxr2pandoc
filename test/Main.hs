@@ -24,6 +24,7 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    separateCodeBlockFromMore,
                                    siteEmbedsToShortcode, siteRelativeUrl,
                                    unflankedEmphasisToHtml, urlRewriterContent,
+                                   tweetEmbedsToHtml, tweetUrl,
                                    youtubeEmbedsToShortcode, youtubeVideo)
 import           WXR2Pandoc.WXR (Post (..), PostType (..))
 
@@ -56,6 +57,7 @@ tests = testGroup "WXR2Pandoc"
   , relativizeSiteUrlsTests
   , siteEmbedsToShortcodeTests
   , youtubeEmbedsToShortcodeTests
+  , tweetEmbedsToHtmlTests
   , urlRewriterContentTests
   ]
 
@@ -799,6 +801,7 @@ samplePost = Post
   , postCategories = []
   , postTags = []
   , postThumbnail = Nothing
+  , postOembeds = []
   }
 
 postMetadataTests :: TestTree
@@ -958,6 +961,29 @@ youtubeEmbedsToShortcodeTests = testGroup "youtubeEmbedsToShortcode"
     caption = Caption Nothing [Plain [Str "video"]]
     wrapper url = Div ("", ["wp-block-embed__wrapper"], []) [Plain [SoftBreak, Str url, SoftBreak]]
     embed url = Figure ("", ["wp-block-embed", "is-provider-youtube"], []) (Caption Nothing []) [wrapper url]
+
+tweetEmbedsToHtmlTests :: TestTree
+tweetEmbedsToHtmlTests = testGroup "tweetEmbedsToHtml"
+  [ testCase "tweet URLs" $ do
+      tweetUrl "https://twitter.com/mod_poppo/status/123" @?= Just ("mod_poppo", "123")
+      tweetUrl "https://x.com/mod_poppo/status/123?s=20" @?= Just ("mod_poppo", "123")
+      tweetUrl "https://twitter.com/mod_poppo" @?= Nothing
+      tweetUrl "https://example.com/mod_poppo/status/123" @?= Nothing
+  , testCase "cached tweet" $
+      tweetEmbedsToHtml [other, cached] (doc [embed "https://twitter.com/a/status/123"]) @?=
+        doc [RawBlock (Format "html") "<blockquote class=\"twitter-tweet\"><p>hi</p>\n<a href=\"https://twitter.com/a/status/123?ref_src=twsrc%5Etfw\">date</a></blockquote>"]
+  , testCase "shortcode if not cached" $
+      either (Left . show) Right (renderCommonMark False (tweetEmbedsToHtml [other] (doc [embed "https://twitter.com/a/status/123"]))) @?=
+        Right "{{< x user=\"a\" id=\"123\" >}}\n"
+  , testCase "embeds of other sites are kept" $
+      tweetEmbedsToHtml [cached] (doc [embed "https://www.youtube.com/watch?v=x"]) @?= doc [embed "https://www.youtube.com/watch?v=x"]
+  ]
+  where
+    -- A tweet whose ID has the other as a prefix, and a blank line to be removed
+    other = "<blockquote class=\"twitter-tweet\"><a href=\"https://twitter.com/a/status/1234\">date</a></blockquote>"
+    cached = "<blockquote class=\"twitter-tweet\"><p>hi</p>\n\n<a href=\"https://twitter.com/a/status/123?ref_src=twsrc%5Etfw\">date</a></blockquote>"
+    embed url = Figure ("", ["wp-block-embed", "is-provider-twitter"], []) (Caption Nothing [])
+                  [Div ("", ["wp-block-embed__wrapper"], []) [Plain [SoftBreak, Str url, SoftBreak]]]
 
 urlRewriterContentTests :: TestTree
 urlRewriterContentTests = testGroup "urlRewriterContent"

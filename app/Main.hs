@@ -72,6 +72,7 @@ data ConvertAllOptions = ConvertAllOptions
   , caRelativeMedia :: Bool
   , caEmbedShortcode :: Maybe T.Text
   , caYoutubeShortcode :: Bool
+  , caTweetEmbeds :: Bool
   , caInputXml   :: String
   }
 
@@ -109,6 +110,7 @@ convertAllOptions = ConvertAllOptions
   <*> OA.switch (OA.long "relative-media" <> OA.help "Also rewrite URLs of media files (under wp-content/) into the site as root-relative URLs (with --base-url), for media placed by 'download-media --output <hugo site>/static'")
   <*> optional (OA.strOption (OA.long "embed-shortcode" <> OA.metavar "NAME" <> OA.help "Replace embed blocks of pages of the site with a Hugo shortcode like {{< NAME \"/2026/07/hello/\" >}} (with --base-url)"))
   <*> OA.switch (OA.long "youtube-shortcode" <> OA.help "Replace YouTube embed blocks with Hugo's built-in shortcode like {{< youtube id=\"ID\" start=\"10\" >}}")
+  <*> OA.switch (OA.long "tweet-embeds" <> OA.help "Replace X (Twitter) embed blocks with the tweet HTML in WordPress's oEmbed cache, or with Hugo's built-in shortcode like {{< x user=\"USER\" id=\"ID\" >}} if not cached")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 downloadMediaOptions :: OA.Parser DownloadMediaOptions
@@ -268,6 +270,7 @@ runConvertAll typ ConvertAllOptions {..} = do
           let doc = maybe id (relativizeSiteUrls caRelativeMedia permalinks) caBaseUrl $
                     maybe id (uncurry siteEmbedsToShortcode) ((,) <$> caEmbedShortcode <*> caBaseUrl) $
                     (if caYoutubeShortcode then youtubeEmbedsToShortcode else id) $
+                    (if caTweetEmbeds then tweetEmbedsToHtml (postOembeds p) else id) $
                     if caHoistMathPreamble then hoistMathPreamble doc0 else doc0
           let getOutputPath ext = case caOutputPath of
                 Just tpl -> caOutputDir ++ "/" ++ T.unpack (expandOutputPath tpl caBaseUrl p ext)

@@ -37,6 +37,7 @@ data Post = Post { postType         :: PostType
                  , postCategories   :: [T.Text] -- slugs (nicename)
                  , postTags         :: [T.Text]
                  , postThumbnail    :: Maybe T.Text -- URL of the featured image
+                 , postOembeds      :: [T.Text] -- HTML in the oEmbed cache (_oembed_* post meta)
                  }
           deriving (Show)
 
@@ -134,6 +135,14 @@ processFile filename = do
     let postmeta key = item XC.$| XC.child >=> XC.element (XC.Name "postmeta" namespace_wp Nothing)
                                  >=> XC.check (\m -> mconcat (m XC.$/ XC.element (XC.Name "meta_key" namespace_wp Nothing) XC.&/ XC.content) == key)
                                  >=> XC.child >=> XC.element (XC.Name "meta_value" namespace_wp Nothing) >=> XC.child >=> XC.content
+    -- WordPress caches oEmbed HTML as _oembed_<hash> (and the time as _oembed_time_<hash>),
+    -- or {{unknown}} if the fetch failed
+    let oembeds = [ value
+                  | m <- item XC.$| XC.child >=> XC.element (XC.Name "postmeta" namespace_wp Nothing)
+                  , let key = mconcat (m XC.$/ XC.element (XC.Name "meta_key" namespace_wp Nothing) XC.&/ XC.content)
+                  , "_oembed_" `T.isPrefixOf` key, not ("_oembed_time_" `T.isPrefixOf` key)
+                  , let value = mconcat (m XC.$/ XC.element (XC.Name "meta_value" namespace_wp Nothing) XC.&/ XC.content)
+                  , value /= "{{unknown}}" ]
     let thumbnail = case postmeta "_thumbnail_id" of
                       v:_ | Right (thumbnailId, _) <- T.decimal (T.strip v) -> Map.lookup thumbnailId attachmentUrls
                       _ -> Nothing
@@ -155,6 +164,7 @@ processFile filename = do
                               , postCategories = categories
                               , postTags = tags
                               , postThumbnail = thumbnail
+                              , postOembeds = oembeds
                               }
              ]
       "page" -> do
@@ -173,6 +183,7 @@ processFile filename = do
                               , postCategories = categories
                               , postTags = tags
                               , postThumbnail = thumbnail
+                              , postOembeds = oembeds
                               }
              ]
       "attachment" -> do
