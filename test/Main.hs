@@ -311,6 +311,10 @@ mathTests = testGroup "Math"
       parseWpHtml "<p>The formula \\(x^2\\) is simple</p>" @?=
         doc [Para [Str "The", Space, Str "formula", Space, Math InlineMath "x^2", Space, Str "is", Space, Str "simple"]]
 
+  , testCase "latex shortcode" $
+      parseWpHtml "<p>Formula: [latex]F(f\\circ g)=F(f)\\circ F(g)[/latex]</p>" @?=
+        doc [Para [Str "Formula:", Space, Math InlineMath "F(f\\circ g)=F(f)\\circ F(g)"]]
+
   , testCase "display math" $
       parseWpHtml "<p>\\[E = mc^2\\]</p>" @?=
         doc [Para [Math DisplayMath "E = mc^2"]]
@@ -596,6 +600,9 @@ pandocShortcodeTests = testGroup "Shortcodes"
       parsePandoc "<p>[mathjax]Hello</p>" @?=
         doc [Para [Str "Hello"]]
 
+  , testCase "latex shortcode becomes inline math" $
+      parsePandoc "<p>a [latex](a+b)^n=\\sum_{k=0}^n a_k[/latex] b</p>" @?=
+        doc [Para [Str "a", Space, Math InlineMath "(a+b)^n=\\sum_{k=0}^n a_k", Space, Str "b"]]
   , testCase "toc shortcode becomes html comment" $
       parsePandoc "<p>[toc]</p>" @?=
         doc [Para [RawInline (Format "html") "<!--toc-->"]]
