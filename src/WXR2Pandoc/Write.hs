@@ -19,6 +19,7 @@ module WXR2Pandoc.Write
   , youtubeVideo
   , tweetEmbedsToHtml
   , tableMathToShortcode
+  , plainNewTabLinks
   , tweetUrl
   , expandOutputPath
   , categoryIndexContent
@@ -278,6 +279,21 @@ tableMathToShortcode = P.walk table
     math (Math InlineMath s)  = RawInline (Format "html") ("{{< math >}}" <> s <> "{{< /math >}}")
     math (Math DisplayMath s) = RawInline (Format "html") ("{{< math display >}}" <> s <> "{{< /math >}}")
     math x = x
+
+-- | Drop the attributes of links that only open in a new tab
+-- (@target="_blank"@ and @rel@ with @noopener@ and/or @noreferrer@, which WordPress adds),
+-- so that they are written in the Markdown syntax rather than as @<a>@ tags.
+-- Hugo would otherwise autolink URLs in the text of the tags, nesting links.
+-- The theme is expected to open external links in a new tab.
+plainNewTabLinks :: Pandoc -> Pandoc
+plainNewTabLinks = P.walk go
+  where
+    go (Link ("", [], kv) content target)
+      | lookup "target" kv == Just "_blank"
+      , all ((`elem` ["target", "rel"]) . fst) kv
+      , all (`elem` ["noopener", "noreferrer"]) (maybe [] T.words (lookup "rel" kv))
+      = Link nullAttr content target
+    go inl = inl
 
 -- | User name and tweet ID of a URL like @https://twitter.com/USER/status/ID@ or @https://x.com/USER/status/ID@
 tweetUrl :: T.Text -> Maybe (T.Text, T.Text)

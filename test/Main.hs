@@ -24,7 +24,8 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    separateCodeBlockFromMore,
                                    siteEmbedsToShortcode, siteRelativeUrl,
                                    unflankedEmphasisToHtml, urlRewriterContent,
-                                   tableMathToShortcode, tweetEmbedsToHtml,
+                                   plainNewTabLinks, tableMathToShortcode,
+                                   tweetEmbedsToHtml,
                                    tweetUrl,
                                    youtubeEmbedsToShortcode, youtubeVideo)
 import           WXR2Pandoc.WXR (Post (..), PostType (..))
@@ -60,6 +61,7 @@ tests = testGroup "WXR2Pandoc"
   , youtubeEmbedsToShortcodeTests
   , tweetEmbedsToHtmlTests
   , tableMathToShortcodeTests
+  , plainNewTabLinksTests
   , urlRewriterContentTests
   ]
 
@@ -967,6 +969,29 @@ youtubeEmbedsToShortcodeTests = testGroup "youtubeEmbedsToShortcode"
     caption = Caption Nothing [Plain [Str "video"]]
     wrapper url = Div ("", ["wp-block-embed__wrapper"], []) [Plain [SoftBreak, Str url, SoftBreak]]
     embed url = Figure ("", ["wp-block-embed", "is-provider-youtube"], []) (Caption Nothing []) [wrapper url]
+
+plainNewTabLinksTests :: TestTree
+plainNewTabLinksTests = testGroup "plainNewTabLinks"
+  [ testCase "new tab links" $ do
+      plain [("target", "_blank"), ("rel", "noopener noreferrer")] @?= para []
+      plain [("target", "_blank"), ("rel", "noreferrer noopener")] @?= para []
+      plain [("target", "_blank"), ("rel", "noopener")] @?= para []
+      plain [("target", "_blank")] @?= para []
+  , testCase "other attributes are kept" $ do
+      plain [("rel", "noopener")] @?= para [("rel", "noopener")]
+      plain [("target", "_blank"), ("rel", "nofollow")] @?= para [("target", "_blank"), ("rel", "nofollow")]
+      plain [("target", "_blank"), ("data-id", "3")] @?= para [("target", "_blank"), ("data-id", "3")]
+  , testCase "rendered as an autolink (dropping the title)" $
+      either (Left . show) Right (renderCommonMark False (plainNewTabLinks (doc [Para [link [("target", "_blank"), ("rel", "noopener noreferrer")]]]))) @?=
+        Right "<https://example.com/>\n"
+  , testCase "rendered as Markdown with the title" $
+      either (Left . show) Right (renderCommonMark False (plainNewTabLinks (doc [Para [Link ("", [], [("target", "_blank")]) [Str "text"] ("https://example.com/", "T")]]))) @?=
+        Right "[text](https://example.com/ \"T\")\n"
+  ]
+  where
+    link kv = Link ("", [], kv) [Str "https://example.com/"] ("https://example.com/", "T")
+    para kv = doc [Para [link kv]]
+    plain kv = plainNewTabLinks (para kv)
 
 tableMathToShortcodeTests :: TestTree
 tableMathToShortcodeTests = testGroup "tableMathToShortcode"

@@ -110,7 +110,7 @@ convertAllOptions = ConvertAllOptions
   <*> OA.switch (OA.long "relative-media" <> OA.help "Also rewrite URLs of media files (under wp-content/) into the site as root-relative URLs (with --base-url), for media placed by 'download-media --output <hugo site>/static'")
   <*> optional (OA.strOption (OA.long "embed-shortcode" <> OA.metavar "NAME" <> OA.help "Replace embed blocks of pages of the site with a Hugo shortcode like {{< NAME \"/2026/07/hello/\" >}} (with --hugo and --base-url)"))
   <*> OA.switch (OA.long "tweet-embeds" <> OA.help "Replace X (Twitter) embed blocks with the tweet HTML in WordPress's oEmbed cache, or with Hugo's built-in shortcode like {{< x user=\"USER\" id=\"ID\" >}} if not cached (with --hugo)")
-  <*> OA.switch (OA.long "hugo" <> OA.help "Write Hugo shortcodes: YouTube embed blocks as {{< youtube id=\"ID\" start=\"10\" >}}, and math in tables (written as raw HTML) as {{< math >}}TeX{{< /math >}}, which the theme has to provide. Also enables the shortcodes of --embed-shortcode and --tweet-embeds")
+  <*> OA.switch (OA.long "hugo" <> OA.help "Write Hugo shortcodes: YouTube embed blocks as {{< youtube id=\"ID\" start=\"10\" >}}, and math in tables (written as raw HTML) as {{< math >}}TeX{{< /math >}}, which the theme has to provide. Links that only open in a new tab (target=\"_blank\" with rel=\"noopener noreferrer\") are written as Markdown links, leaving new tabs to the theme. Also enables the shortcodes of --embed-shortcode and --tweet-embeds")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 downloadMediaOptions :: OA.Parser DownloadMediaOptions
@@ -269,7 +269,7 @@ runConvertAll typ ConvertAllOptions {..} = do
         Right doc0 -> do
           let doc = maybe id (relativizeSiteUrls caRelativeMedia permalinks) caBaseUrl $
                     maybe id (uncurry siteEmbedsToShortcode) ((,) <$> (guard caHugo *> caEmbedShortcode) <*> caBaseUrl) $
-                    (if caHugo then youtubeEmbedsToShortcode . tableMathToShortcode else id) $
+                    (if caHugo then plainNewTabLinks . youtubeEmbedsToShortcode . tableMathToShortcode else id) $
                     (if caTweetEmbeds then tweetEmbedsToHtml caHugo (postOembeds p) else id) $
                     if caHoistMathPreamble then hoistMathPreamble doc0 else doc0
           let getOutputPath ext = case caOutputPath of
