@@ -991,13 +991,15 @@ tweetEmbedsToHtmlTests = testGroup "tweetEmbedsToHtml"
       tweetUrl "https://twitter.com/mod_poppo" @?= Nothing
       tweetUrl "https://example.com/mod_poppo/status/123" @?= Nothing
   , testCase "cached tweet" $
-      tweetEmbedsToHtml [other, cached] (doc [embed "https://twitter.com/a/status/123"]) @?=
+      tweetEmbedsToHtml True [other, cached] (doc [embed "https://twitter.com/a/status/123"]) @?=
         doc [RawBlock (Format "html") "<blockquote class=\"twitter-tweet\"><p>hi</p>\n<a href=\"https://twitter.com/a/status/123?ref_src=twsrc%5Etfw\">date</a></blockquote>"]
   , testCase "shortcode if not cached" $
-      either (Left . show) Right (renderCommonMark False (tweetEmbedsToHtml [other] (doc [embed "https://twitter.com/a/status/123"]))) @?=
+      either (Left . show) Right (renderCommonMark False (tweetEmbedsToHtml True [other] (doc [embed "https://twitter.com/a/status/123"]))) @?=
         Right "{{< x user=\"a\" id=\"123\" >}}\n"
+  , testCase "kept if not cached without shortcodes" $
+      tweetEmbedsToHtml False [other] (doc [embed "https://twitter.com/a/status/123"]) @?= doc [embed "https://twitter.com/a/status/123"]
   , testCase "embeds of other sites are kept" $
-      tweetEmbedsToHtml [cached] (doc [embed "https://www.youtube.com/watch?v=x"]) @?= doc [embed "https://www.youtube.com/watch?v=x"]
+      tweetEmbedsToHtml True [cached] (doc [embed "https://www.youtube.com/watch?v=x"]) @?= doc [embed "https://www.youtube.com/watch?v=x"]
   ]
   where
     -- A tweet whose ID has the other as a prefix, and a blank line to be removed

@@ -238,21 +238,24 @@ youtubeEmbedsToShortcode = P.walk go
     go b = b
 
 -- | Replace X (Twitter) embed blocks (@wp-block-embed@) with the tweet HTML in the oEmbed cache
--- of the post (see 'postOembeds'), or with Hugo's built-in shortcode
--- like @{{< x user="USER" id="ID" >}}@ if the tweet is not cached.
-tweetEmbedsToHtml :: [T.Text] -> Pandoc -> Pandoc
-tweetEmbedsToHtml oembeds = P.walk go
+-- of the post (see 'postOembeds').
+-- If the tweet is not cached, the block is replaced with Hugo's built-in shortcode
+-- like @{{< x user="USER" id="ID" >}}@ if the first argument is True, or kept otherwise.
+tweetEmbedsToHtml :: Bool -> [T.Text] -> Pandoc -> Pandoc
+tweetEmbedsToHtml shortcode oembeds = P.walk go
   where
-    go (Figure attr@(_, classes, _) caption [Div (_, ["wp-block-embed__wrapper"], _) [Plain inls]])
+    go b@(Figure attr@(_, classes, _) caption [Div (_, ["wp-block-embed__wrapper"], _) [Plain inls]])
       | "wp-block-embed" `elem` classes
       , [Str url] <- filter (`notElem` [SoftBreak, Space, LineBreak]) inls
       , Just (user, tweetId) <- tweetUrl url
-      , let block = case filter (isCachedTweet tweetId) oembeds of
-                      html : _ -> RawBlock (Format "html") (removeBlankLines html)
-                      [] -> RawBlock (Format "commonmark") ("{{< x user=" <> jsonString user <> " id=" <> jsonString tweetId <> " >}}")
-      = case caption of
-          Caption Nothing [] -> block
-          _                  -> Figure attr caption [block]
+      = case filter (isCachedTweet tweetId) oembeds of
+          html : _ -> withCaption $ RawBlock (Format "html") (removeBlankLines html)
+          [] | shortcode -> withCaption $ RawBlock (Format "commonmark") ("{{< x user=" <> jsonString user <> " id=" <> jsonString tweetId <> " >}}")
+             | otherwise -> b
+      where
+        withCaption block = case caption of
+            Caption Nothing [] -> block
+            _                  -> Figure attr caption [block]
     go b = b
     -- The cached blockquote links to the tweet like https://twitter.com/USER/status/ID?ref_src=...
     isCachedTweet tweetId html =
