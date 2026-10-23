@@ -8,6 +8,7 @@ module WXR2Pandoc.Write
   , renderCommonMark
   , mathDelimitersToEntities
   , unflankedEmphasisToHtml
+  , separateCodeBlockFromMore
   , writePandocJSONFile
   , makeRelativeUrl
   , siteRelativeUrl
@@ -216,7 +217,7 @@ renderCommonMark delimiterEntities doc = do
     let tpl = case tplResult of
                 Left e  -> error e
                 Right t -> t
-    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unflankedEmphasisToHtml $ P.walk unparseShortcode doc'
+    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unflankedEmphasisToHtml $ P.walk separateCodeBlockFromMore $ P.walk unparseShortcode doc'
   pure $ insertFrontMatter quotedLines content
   where
     (quotedLines, doc') = takeQuotedStringLists doc
@@ -313,6 +314,24 @@ unflankedEmphasisToHtml = go FlankPunct
       in inFirst /= FlankSpace && (inFirst /= FlankPunct || before /= FlankOther)
          && inLast /= FlankSpace && (inLast /= FlankPunct || after /= FlankOther)
     tagged tag content = [RawInline (Format "html") ("<" <> tag <> ">")] ++ content ++ [RawInline (Format "html") ("</" <> tag <> ">")]
+
+-- | Put an empty HTML comment between the @<!--more-->@ summary divider and
+-- a following code block that would be written as an indented code block.
+-- Hugo strips the whitespace after the divider, which would turn the code into a paragraph.
+separateCodeBlockFromMore :: [Block] -> [Block]
+separateCodeBlockFromMore (b : xs@(CodeBlock attr _ : _))
+  | attr == nullAttr, endsWithMore b = b : RawBlock (Format "html") "<!-- -->" : separateCodeBlockFromMore xs
+  where
+    endsWithMore (RawBlock (Format "html") s) = isMore s
+    endsWithMore (Para inls)  = endsWithMoreInline inls
+    endsWithMore (Plain inls) = endsWithMoreInline inls
+    endsWithMore _            = False
+    endsWithMoreInline inls = case reverse (filter (`notElem` [P.Space, SoftBreak, LineBreak]) inls) of
+                                RawInline (Format "html") s : _ -> isMore s
+                                _ -> False
+    isMore s = T.strip s == "<!--more-->"
+separateCodeBlockFromMore (b : xs) = b : separateCodeBlockFromMore xs
+separateCodeBlockFromMore [] = []
 
 -- | Keep the mathPreamble metadata (TeX code) from being escaped as Markdown
 rawMathPreamble :: Pandoc -> Pandoc

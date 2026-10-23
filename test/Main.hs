@@ -20,6 +20,7 @@ import           WXR2Pandoc.ParseHTML (parseWpHtml)
 import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    mathDelimitersToEntities, parsePostWith,
                                    relativizeSiteUrls, renderCommonMark,
+                                   separateCodeBlockFromMore,
                                    siteEmbedsToShortcode, siteRelativeUrl,
                                    unflankedEmphasisToHtml, urlRewriterContent)
 import           WXR2Pandoc.WXR (Post (..), PostType (..))
@@ -48,6 +49,7 @@ tests = testGroup "WXR2Pandoc"
   , hoistMathPreambleTests
   , mathDelimitersToEntitiesTests
   , unflankedEmphasisToHtmlTests
+  , separateCodeBlockFromMoreTests
   , postMetadataTests
   , relativizeSiteUrlsTests
   , siteEmbedsToShortcodeTests
@@ -754,6 +756,28 @@ unflankedEmphasisToHtmlTests = testGroup "unflankedEmphasisToHtml"
   ]
   where
     html = Format "html"
+
+separateCodeBlockFromMoreTests :: TestTree
+separateCodeBlockFromMoreTests = testGroup "separateCodeBlockFromMore"
+  [ testCase "divider at the end of a paragraph" $
+      separateCodeBlockFromMore [Para [Str "a", more], CodeBlock nullAttr "x"] @?=
+        [Para [Str "a", more], RawBlock html "<!-- -->", CodeBlock nullAttr "x"]
+  , testCase "divider as a block" $
+      separateCodeBlockFromMore [RawBlock html "<!--more-->", CodeBlock nullAttr "x"] @?=
+        [RawBlock html "<!--more-->", RawBlock html "<!-- -->", CodeBlock nullAttr "x"]
+  , testCase "fenced code block is untouched" $
+      separateCodeBlockFromMore [Para [Str "a", more], CodeBlock ("", ["c"], []) "x"] @?=
+        [Para [Str "a", more], CodeBlock ("", ["c"], []) "x"]
+  , testCase "divider not at the end is untouched" $
+      separateCodeBlockFromMore [Para [more, Str "a"], CodeBlock nullAttr "x"] @?=
+        [Para [more, Str "a"], CodeBlock nullAttr "x"]
+  , testCase "renders the comment" $
+      either (Left . show) Right (renderCommonMark False (doc [Para [Str "a", more], CodeBlock nullAttr "#include <x>"])) @?=
+        Right "a<!--more-->\n\n<!-- -->\n\n    #include <x>\n"
+  ]
+  where
+    html = Format "html"
+    more = RawInline html "<!--more-->"
 
 -- | A post dated 2026-08-01 00:30 +09:00 (2026-07-31 in UTC)
 samplePost :: Post
