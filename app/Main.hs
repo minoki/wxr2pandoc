@@ -69,6 +69,7 @@ data ConvertAllOptions = ConvertAllOptions
   , caHtmlReader :: HTMLReader
   , caHoistMathPreamble :: Bool
   , caMathDelimiterEntities :: Bool
+  , caMathRefs :: Bool
   , caRelativeMedia :: Bool
   , caEmbedShortcode :: Maybe T.Text
   , caTweetEmbeds :: Bool
@@ -107,10 +108,11 @@ convertAllOptions = ConvertAllOptions
   <*> OA.flag HTMLReaderPandoc HTMLReaderCustom (OA.long "custom-parser" <> OA.help "Use custom HTML parser instead of Pandoc")
   <*> OA.switch (OA.long "hoist-math-preamble" <> OA.help "Move math consisting only of macro definitions (\\newcommand, \\def, \\DeclareMathOperator, etc.) to the 'mathPreamble' metadata")
   <*> OA.switch (OA.long "math-delimiter-entities" <> OA.help "Write brackets and dollar signs in plain text as &lbrack;, &rbrack; and &dollar; instead of \\[, \\] and $, which Hugo's passthrough extension takes as math delimiters")
+  <*> OA.switch (OA.long "math-refs" <> OA.help "Number equations in display math (equation, align, alignat and gather; with --hugo, also those outside math) with \\tag{N}, remove \\label and replace \\ref and \\eqref with the numbers, for KaTeX, which supports neither \\label nor \\ref")
   <*> OA.switch (OA.long "relative-media" <> OA.help "Also rewrite URLs of media files (under wp-content/) into the site as root-relative URLs (with --base-url), for media placed by 'download-media --output <hugo site>/static'")
   <*> optional (OA.strOption (OA.long "embed-shortcode" <> OA.metavar "NAME" <> OA.help "Replace embed blocks of pages of the site with a Hugo shortcode like {{< NAME \"/2026/07/hello/\" >}} (with --hugo and --base-url)"))
   <*> OA.switch (OA.long "tweet-embeds" <> OA.help "Replace X (Twitter) embed blocks with the tweet HTML in WordPress's oEmbed cache, or with Hugo's built-in shortcode like {{< x user=\"USER\" id=\"ID\" >}} if not cached (with --hugo)")
-  <*> OA.switch (OA.long "hugo" <> OA.help "Write Hugo shortcodes: YouTube embed blocks as {{< youtube id=\"ID\" start=\"10\" >}}, and math in tables (written as raw HTML) as {{< math >}}TeX{{< /math >}}, which the theme has to provide. LaTeX math environments (like \\begin{align*}) outside math are written as display math, and equations are numbered with \\tag{N}, replacing \\ref and \\eqref with the numbers. Links that only open in a new tab (target=\"_blank\" with rel=\"noopener noreferrer\") are written as Markdown links, leaving new tabs to the theme. Also enables the shortcodes of --embed-shortcode and --tweet-embeds")
+  <*> OA.switch (OA.long "hugo" <> OA.help "Write Hugo shortcodes: YouTube embed blocks as {{< youtube id=\"ID\" start=\"10\" >}}, and math in tables (written as raw HTML) as {{< math >}}TeX{{< /math >}}, which the theme has to provide. LaTeX math environments (like \\begin{align*}) outside math are written as display math. Links that only open in a new tab (target=\"_blank\" with rel=\"noopener noreferrer\") are written as Markdown links, leaving new tabs to the theme. Also enables the shortcodes of --embed-shortcode and --tweet-embeds")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 downloadMediaOptions :: OA.Parser DownloadMediaOptions
@@ -269,7 +271,9 @@ runConvertAll typ ConvertAllOptions {..} = do
         Right doc0 -> do
           let doc = maybe id (relativizeSiteUrls caRelativeMedia permalinks) caBaseUrl $
                     maybe id (uncurry siteEmbedsToShortcode) ((,) <$> (guard caHugo *> caEmbedShortcode) <*> caBaseUrl) $
-                    (if caHugo then plainNewTabLinks . youtubeEmbedsToShortcode . tableMathToShortcode . numberEquations . latexEnvironmentsToMath else id) $
+                    (if caHugo then plainNewTabLinks . youtubeEmbedsToShortcode . tableMathToShortcode else id) $
+                    (if caMathRefs then numberEquations else id) $
+                    (if caHugo then latexEnvironmentsToMath else id) $
                     (if caTweetEmbeds then tweetEmbedsToHtml caHugo (postOembeds p) else id) $
                     if caHoistMathPreamble then hoistMathPreamble doc0 else doc0
           let getOutputPath ext = case caOutputPath of
