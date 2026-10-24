@@ -550,20 +550,24 @@ parseInline (TokTagOpen "sup" _ : rest) =
   in ([Superscript $ mergeInlines inlines], rest')
 parseInline (tok : rest) = ([tokenToInline tok], rest)
 
--- | Collect code content (text only)
+-- | Collect code content (text only).
+-- Nested @<code>@ (like @<code><code>foo</code></code>@) is flattened.
 collectCodeContent :: [Token] -> (T.Text, [Token])
-collectCodeContent = go []
+collectCodeContent = go (0 :: Int) []
   where
-    go acc []                          = (T.concat $ reverse acc, [])
-    go acc (TokTagClose "code" : rest) = (T.concat $ reverse acc, rest)
-    go acc (TokText t : rest)          = go (t : acc) rest
-    go acc (TokNewlines n : rest)      = go (T.replicate n "\n" : acc) rest
-    go acc (TokShortcode _ src : rest) = go (src : acc) rest
-    go acc (TokShortcodeClose _ src : rest) = go (src : acc) rest
-    go acc (TokMathInline m : rest)    = go ("\\(" <> m <> "\\)" : acc) rest
-    go acc (TokMathDisplay m : rest)   = go ("\\[" <> m <> "\\]" : acc) rest
-    go acc (TokLatexEnv src : rest)    = go (src : acc) rest
-    go acc (_ : rest)                  = go acc rest
+    go _ acc []                               = (T.concat $ reverse acc, [])
+    go depth acc (TokTagOpen "code" _ : rest) = go (depth + 1) acc rest
+    go depth acc (TokTagClose "code" : rest)
+      | depth > 0                             = go (depth - 1) acc rest
+      | otherwise                             = (T.concat $ reverse acc, rest)
+    go depth acc (TokText t : rest)           = go depth (t : acc) rest
+    go depth acc (TokNewlines n : rest)       = go depth (T.replicate n "\n" : acc) rest
+    go depth acc (TokShortcode _ src : rest)  = go depth (src : acc) rest
+    go depth acc (TokShortcodeClose _ src : rest) = go depth (src : acc) rest
+    go depth acc (TokMathInline m : rest)     = go depth ("\\(" <> m <> "\\)" : acc) rest
+    go depth acc (TokMathDisplay m : rest)    = go depth ("\\[" <> m <> "\\]" : acc) rest
+    go depth acc (TokLatexEnv src : rest)     = go depth (src : acc) rest
+    go depth acc (_ : rest)                   = go depth acc rest
 
 -- | Check if character is horizontal whitespace (space or tab)
 isHorizWhitespace :: Char -> Bool

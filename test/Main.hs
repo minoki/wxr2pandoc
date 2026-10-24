@@ -147,6 +147,10 @@ inlineTests = testGroup "Inline elements"
       parseWpHtml "<p><code>x = 1</code></p>" @?=
         doc [Para [Code ("", [], []) "x = 1"]]
 
+  , testCase "nested code" $
+      parseWpHtml "<p><code><code>x</code></code> y</p>" @?=
+        doc [Para [Code ("", [], []) "x", Space, Str "y"]]
+
   , testCase "link" $
       parseWpHtml "<p><a href=\"https://example.com\">link</a></p>" @?=
         doc [Para [Link ("", [], []) [Str "link"] ("https://example.com", "")]]
@@ -511,6 +515,10 @@ pandocInlineTests = testGroup "Inline elements"
   , testCase "code" $
       parsePandoc "<p><code>x = 1</code></p>" @?=
         doc [Para [Code ("", [], []) "x = 1"]]
+
+  , testCase "nested code" $
+      parsePandoc "<p><code><code>x</code></code> y</p>" @?=
+        doc [Para [Code ("", [], []) "x", Space, Str "y"]]
 
   , testCase "link" $
       parsePandoc "<p><a href=\"https://example.com\">link</a></p>" @?=
