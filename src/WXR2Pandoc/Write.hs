@@ -272,7 +272,7 @@ tweetEmbedsToHtml shortcode oembeds = P.walk go
     removeBlankLines = T.intercalate "\n" . filter (not . T.all isSpace) . T.lines
 
 -- | Write LaTeX math environments outside math (like @\\begin{align*}...\\end{align*}@) as display math,
--- since Hugo's passthrough extension finds math only between the delimiters.
+-- since Hugo's passthrough extension and KaTeX find math only between the delimiters.
 -- Only environments that KaTeX supports at the top level are converted.
 latexEnvironmentsToMath :: Pandoc -> Pandoc
 latexEnvironmentsToMath = P.walk go
