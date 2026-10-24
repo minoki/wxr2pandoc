@@ -9,6 +9,7 @@ module WXR2Pandoc.Write
   , mathDelimitersToEntities
   , unflankedEmphasisToHtml
   , separateCodeBlockFromMore
+  , separateLeadingRawElements
   , writePandocJSONFile
   , makeRelativeUrl
   , siteRelativeUrl
@@ -399,7 +400,7 @@ renderCommonMark delimiterEntities doc = do
     let tpl = case tplResult of
                 Left e  -> error e
                 Right t -> t
-    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unflankedEmphasisToHtml $ P.walk separateCodeBlockFromMore $ P.walk unparseShortcode doc'
+    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unflankedEmphasisToHtml $ P.walk separateCodeBlockFromMore $ P.walk separateLeadingRawElements $ P.walk unparseShortcode doc'
   pure $ insertFrontMatter quotedLines content
   where
     (quotedLines, doc') = takeQuotedStringLists doc
@@ -514,6 +515,39 @@ separateCodeBlockFromMore (b : xs@(CodeBlock attr _ : _))
     isMore s = T.strip s == "<!--more-->"
 separateCodeBlockFromMore (b : xs) = b : separateCodeBlockFromMore xs
 separateCodeBlockFromMore [] = []
+
+-- | Split @<style>@ and @<script>@ elements at the start of a paragraph into a raw HTML block.
+-- CommonMark treats the rest of the line after such an element as part of the HTML block,
+-- so Markdown following it on the same line would not be interpreted.
+separateLeadingRawElements :: [Block] -> [Block]
+separateLeadingRawElements = concatMap go
+  where
+    go (Para inls)  | Just (raw, rest) <- split inls = [RawBlock (Format "html") raw, Para rest]
+    go (Plain inls) | Just (raw, rest) <- split inls = [RawBlock (Format "html") raw, Plain rest]
+    go b = [b]
+    split inls = case elements inls of
+                   (raw@(_ : _), rest@(_ : _)) -> Just (T.concat raw, rest)
+                   _ -> Nothing
+    -- Leading elements as raw text, and the remaining inlines
+    elements (RawInline (Format "html") open : xs)
+      | Just name <- openingTag open
+      , (content, RawInline (Format "html") close : rest) <- break (isClosing name) xs
+      , Just texts <- traverse rawText content
+      = let (raws, rest') = elements (dropWhile isSpaceInline rest)
+        in (open : texts ++ [close] ++ raws, rest')
+    elements xs = ([], xs)
+    openingTag s = case T.toLower s of
+                     t | "<style" `T.isPrefixOf` t -> Just "style"
+                       | "<script" `T.isPrefixOf` t -> Just "script"
+                     _ -> Nothing
+    isClosing name (RawInline (Format "html") s) = T.toLower s == "</" <> name <> ">"
+    isClosing _ _ = False
+    rawText (Str s)                      = Just s
+    rawText P.Space                      = Just " "
+    rawText SoftBreak                    = Just "\n"
+    rawText (RawInline (Format "html") s) = Just s
+    rawText _                            = Nothing
+    isSpaceInline x = x `elem` [P.Space, SoftBreak, LineBreak]
 
 -- | Keep the mathPreamble metadata (TeX code) from being escaped as Markdown
 rawMathPreamble :: Pandoc -> Pandoc

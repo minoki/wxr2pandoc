@@ -22,6 +22,7 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    permalinkPaths,
                                    relativizeSiteUrls, renderCommonMark,
                                    separateCodeBlockFromMore,
+                                   separateLeadingRawElements,
                                    siteEmbedsToShortcode, siteRelativeUrl,
                                    unflankedEmphasisToHtml, urlRewriterContent,
                                    plainNewTabLinks, tableMathToShortcode,
@@ -55,6 +56,7 @@ tests = testGroup "WXR2Pandoc"
   , mathDelimitersToEntitiesTests
   , unflankedEmphasisToHtmlTests
   , separateCodeBlockFromMoreTests
+  , separateLeadingRawElementsTests
   , postMetadataTests
   , relativizeSiteUrlsTests
   , siteEmbedsToShortcodeTests
@@ -791,6 +793,24 @@ separateCodeBlockFromMoreTests = testGroup "separateCodeBlockFromMore"
   where
     html = Format "html"
     more = RawInline html "<!--more-->"
+
+separateLeadingRawElementsTests :: TestTree
+separateLeadingRawElementsTests = testGroup "separateLeadingRawElements"
+  [ testCase "style and script at the start of a paragraph" $
+      separateLeadingRawElements [Para [RawInline html "<style type=\"text/css\">", Str ".a{b:1px", Space, Str "c}", RawInline html "</style>", RawInline html "<script>", Str "f();", RawInline html "</script>", Str "text"]] @?=
+        [RawBlock html "<style type=\"text/css\">.a{b:1px c}</style><script>f();</script>", Para [Str "text"]]
+  , testCase "paragraph consisting only of a script is untouched" $
+      separateLeadingRawElements [Para [RawInline html "<script>", Str "f();", RawInline html "</script>"]] @?=
+        [Para [RawInline html "<script>", Str "f();", RawInline html "</script>"]]
+  , testCase "script not at the start is untouched" $
+      separateLeadingRawElements [Para [Str "a", RawInline html "<script>", RawInline html "</script>", Str "b"]] @?=
+        [Para [Str "a", RawInline html "<script>", RawInline html "</script>", Str "b"]]
+  , testCase "renders a blank line after the element" $
+      either (Left . show) Right (renderCommonMark False (doc [Para [RawInline html "<style>", Str "p{}", RawInline html "</style>", Link nullAttr [Str "a"] ("/x/", "")]])) @?=
+        Right "<style>p{}</style>\n\n[a](/x/)\n"
+  ]
+  where
+    html = Format "html"
 
 -- | A post dated 2026-08-01 00:30 +09:00 (2026-07-31 in UTC)
 samplePost :: Post
