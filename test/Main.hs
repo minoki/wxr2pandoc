@@ -26,7 +26,7 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    siteEmbedsToShortcode, siteRelativeUrl,
                                    unflankedEmphasisToHtml, urlRewriterContent,
                                    plainNewTabLinks, tableMathToShortcode,
-                                   latexEnvironmentsToMath,
+                                   latexEnvironmentsToMath, numberEquations,
                                    tweetEmbedsToHtml,
                                    tweetUrl,
                                    youtubeEmbedsToShortcode, youtubeVideo)
@@ -65,6 +65,7 @@ tests = testGroup "WXR2Pandoc"
   , tweetEmbedsToHtmlTests
   , tableMathToShortcodeTests
   , latexEnvironmentsToMathTests
+  , numberEquationsTests
   , plainNewTabLinksTests
   , urlRewriterContentTests
   ]
@@ -1048,6 +1049,23 @@ latexEnvironmentsToMathTests = testGroup "latexEnvironmentsToMath"
   ]
   where
     tex = RawInline (Format "tex")
+
+numberEquationsTests :: TestTree
+numberEquationsTests = testGroup "numberEquations"
+  [ testCase "equation with a label and references" $
+      numberEquations (doc [ Para [Str "式(\\ref{eq:a})", Math InlineMath "\\eqref{eq:b}"]
+                           , Para [Math DisplayMath "\\begin{equation}\n\\begin{split}x&=1\\\\y&=2\\end{split} \\label{eq:a}\n\\end{equation}"]
+                           , Para [Math DisplayMath "\\begin{equation}z \\label{eq:b}\\end{equation}"] ]) @?=
+        doc [ Para [Str "式(1)", Math InlineMath "(2)"]
+            , Para [Math DisplayMath "\\begin{equation}\n\\begin{split}x&=1\\\\y&=2\\end{split}  \\tag{1}\n\\end{equation}"]
+            , Para [Math DisplayMath "\\begin{equation}z  \\tag{2}\\end{equation}"] ]
+  , testCase "rows of align" $
+      numberEquations (doc [Para [Math DisplayMath "\\begin{align}a&=b \\label{x}\\\\c&=d\\nonumber\\\\e&=f\\tag{*}\\label{y}\\\\g&=h\\end{align}", Str "\\ref{x},\\ref{y},\\ref{z}"]]) @?=
+        doc [Para [Math DisplayMath "\\begin{align}a&=b  \\tag{1}\\\\c&=d\\\\e&=f\\tag{*}\\\\g&=h \\tag{2}\\end{align}", Str "1,*,\\ref{z}"]]
+  , testCase "starred environments are not numbered" $
+      numberEquations (doc [Para [Math DisplayMath "\\begin{align*}a\\\\b\\end{align*}"]]) @?=
+        doc [Para [Math DisplayMath "\\begin{align*}a\\\\b\\end{align*}"]]
+  ]
 
 tweetEmbedsToHtmlTests :: TestTree
 tweetEmbedsToHtmlTests = testGroup "tweetEmbedsToHtml"

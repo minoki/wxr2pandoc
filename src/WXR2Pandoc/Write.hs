@@ -21,6 +21,7 @@ module WXR2Pandoc.Write
   , tweetEmbedsToHtml
   , tableMathToShortcode
   , latexEnvironmentsToMath
+  , numberEquations
   , plainNewTabLinks
   , tweetUrl
   , expandOutputPath
@@ -31,6 +32,7 @@ import qualified Data.Aeson as JSON
 import qualified Data.ByteString as BS
 import           Control.Applicative ((<|>))
 import           Control.Monad (guard)
+import           Control.Monad.State.Strict (runState, state)
 import           Data.Char (isAlphaNum, isDigit, isPunctuation, isSpace,
                                       isSymbol)
 import           Data.List (isPrefixOf, stripPrefix)
@@ -281,6 +283,69 @@ latexEnvironmentsToMath = P.walk go
       = Math DisplayMath s
     go x = x
     environments = [name <> star | name <- ["equation", "align", "alignat", "gather"], star <- ["", "*"]]
+
+-- | Number equations in display math of the numbered environments
+-- (@equation@, @align@, @alignat@ and @gather@) with explicit @\\tag{N}@,
+-- and replace @\\ref{LABEL}@ and @\\eqref{LABEL}@ with the numbers, since KaTeX supports neither @\\label@ nor @\\ref@.
+-- Rows with @\\nonumber@ or @\\notag@ are not numbered, and rows with @\\tag@ keep their tags.
+-- @\\label@ is removed from all math; references to unknown labels are kept.
+numberEquations :: Pandoc -> Pandoc
+numberEquations doc = P.walk replaceRefs numbered
+  where
+    (numbered, (_, labels)) = runState (P.walkM number doc) (0 :: Int, [])
+    number (Math DisplayMath m)
+      | Just (open, body, close) <- numberedEnvironment m
+      = Math DisplayMath . (\rows -> open <> T.intercalate "\\\\" rows <> close) <$> traverse numberRow (splitRows body)
+    number x = pure x
+    numberRow row
+      | T.all isSpace row = pure row
+      | any (`T.isInfixOf` row) ["\\nonumber", "\\notag"] = pure (T.replace "\\notag" "" (T.replace "\\nonumber" "" row))
+      | Just tag <- argumentOf "\\tag" row = state $ \(n, ls) -> (row, (n, labelsOf row tag ++ ls))
+      | otherwise = state $ \(n, ls) ->
+          let tag = T.pack (show (n + 1))
+          in (T.dropWhileEnd isSpace row <> " \\tag{" <> tag <> "}" <> T.takeWhileEnd isSpace row, (n + 1, labelsOf row tag ++ ls))
+    labelsOf row tag = [(T.takeWhile (/= '}') t, tag) | t <- drop 1 (T.splitOn "\\label{" row)]
+    replaceRefs (Str s) = Str (refs s)
+    replaceRefs (Math t m) = Math t (refs (removeLabels m))
+    replaceRefs x = x
+    refs s = foldr (\(l, n) -> T.replace ("\\eqref{" <> l <> "}") ("(" <> n <> ")") . T.replace ("\\ref{" <> l <> "}") n) s labels
+    removeLabels m = case T.breakOn "\\label{" m of
+                       (before, rest) | T.null rest -> before
+                                      | otherwise -> before <> removeLabels (T.drop 1 (T.dropWhile (/= '}') rest))
+
+-- | Split a display math of a numbered environment into the opening, the body and the closing
+numberedEnvironment :: T.Text -> Maybe (T.Text, T.Text, T.Text)
+numberedEnvironment m = do
+  let m' = T.strip m
+  rest <- T.stripPrefix "\\begin{" m'
+  let name = T.takeWhile (/= '}') rest
+      open = "\\begin{" <> name <> "}"
+      close = "\\end{" <> name <> "}"
+  guard (name `elem` ["equation", "align", "alignat", "gather"])
+  body <- T.stripPrefix open m' >>= T.stripSuffix close
+  pure (open, body, close)
+
+-- | Split TeX code at @\\\\@ not inside braces or environments
+splitRows :: T.Text -> [T.Text]
+splitRows = go (0 :: Int) ""
+  where
+    go depth acc t = case T.uncons t of
+      Nothing -> [acc]
+      Just ('\\', t')
+        | Just t'' <- T.stripPrefix "\\" t', depth == 0 -> acc : go depth "" t''
+        | "begin{" `T.isPrefixOf` t' -> go (depth + 1) (acc <> "\\begin") (T.drop 5 t')
+        | "end{" `T.isPrefixOf` t' -> go (depth - 1) (acc <> "\\end") (T.drop 3 t')
+        | Just (c, t'') <- T.uncons t' -> go depth (acc <> T.pack ['\\', c]) t''
+        | otherwise -> [acc <> "\\"]
+      Just ('{', t') -> go (depth + 1) (acc <> "{") t'
+      Just ('}', t') -> go (depth - 1) (acc <> "}") t'
+      Just (c, t') -> go depth (acc `T.snoc` c) t'
+
+-- | The argument of the first occurrence of a command like @\\tag{X}@
+argumentOf :: T.Text -> T.Text -> Maybe T.Text
+argumentOf cmd t = case T.breakOn (cmd <> "{") t of
+  (_, rest) | T.null rest -> Nothing
+            | otherwise -> Just (T.takeWhile (/= '}') (T.drop (T.length cmd + 1) rest))
 
 -- | Write math in tables as Hugo shortcodes @{{< math >}}TeX{{< /math >}}@
 -- (@{{< math display >}}@ for display math).
