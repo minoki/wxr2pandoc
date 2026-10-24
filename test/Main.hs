@@ -242,6 +242,14 @@ blockTests = testGroup "Block elements"
       parseWpHtml "<pre><code>\nmain = print 1\n</code></pre>" @?=
         doc [CodeBlock ("", [], []) "main = print 1\n"]
 
+  , testCase "pre block with <br>" $
+      parseWpHtml "<pre>line1<br>line2<br/>line3<br></pre>" @?=
+        doc [CodeBlock ("", [], []) "line1\nline2\nline3\n"]
+
+  , testCase "pre block with LaTeX" $
+      parseWpHtml "<pre><code>\\(a\\) \\[b\\]\n\\begin{theorem}\nc\n\\end{theorem}</code></pre>" @?=
+        doc [CodeBlock ("", [], []) "\\(a\\) \\[b\\]\n\\begin{theorem}\nc\n\\end{theorem}"]
+
   , testCase "hr" $
       parseWpHtml "<p>before</p><hr><p>after</p>" @?=
         doc [Para [Str "before"], HorizontalRule, Para [Str "after"]]

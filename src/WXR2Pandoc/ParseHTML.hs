@@ -363,6 +363,11 @@ collectTextUntil closeTag tokens = go [] (stripLeadingNewline tokens)
       | tag == closeTag = (T.concat $ reverse acc, rest)
     go acc (TokText t : rest) = go (t : acc) rest
     go acc (TokNewlines n : rest) = go (T.replicate n "\n" : acc) rest
+    go acc (TokTagOpen "br" _ : rest) = go ("\n" : acc) rest
+    go acc (TokTagSelfClose "br" _ : rest) = go ("\n" : acc) rest
+    go acc (TokMathInline m : rest) = go ("\\(" <> m <> "\\)" : acc) rest
+    go acc (TokMathDisplay m : rest) = go ("\\[" <> m <> "\\]" : acc) rest
+    go acc (TokLatexEnv src : rest) = go (src : acc) rest
     go acc (TokTagOpen "code" _ : rest) = go acc (stripLeadingNewline rest)
     go acc (TokTagClose "code" : rest) = go acc rest
     go acc (TokShortcode _ src : rest) = go (src : acc) rest
