@@ -26,6 +26,7 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    siteEmbedsToShortcode, siteRelativeUrl,
                                    unflankedEmphasisToHtml, urlRewriterContent,
                                    plainNewTabLinks, tableMathToShortcode,
+                                   latexEnvironmentsToMath,
                                    tweetEmbedsToHtml,
                                    tweetUrl,
                                    youtubeEmbedsToShortcode, youtubeVideo)
@@ -63,6 +64,7 @@ tests = testGroup "WXR2Pandoc"
   , youtubeEmbedsToShortcodeTests
   , tweetEmbedsToHtmlTests
   , tableMathToShortcodeTests
+  , latexEnvironmentsToMathTests
   , plainNewTabLinksTests
   , urlRewriterContentTests
   ]
@@ -1031,6 +1033,21 @@ tableMathToShortcodeTests = testGroup "tableMathToShortcode"
   where
     table inls = Table nullAttr (Caption Nothing []) [(AlignDefault, ColWidthDefault)] (TableHead nullAttr [])
                    [TableBody nullAttr 0 [] [Row nullAttr [Cell nullAttr AlignDefault 1 1 [Plain inls]]]] (TableFoot nullAttr [])
+
+latexEnvironmentsToMathTests :: TestTree
+latexEnvironmentsToMathTests = testGroup "latexEnvironmentsToMath"
+  [ testCase "math environments" $
+      latexEnvironmentsToMath (doc [Para [Str "a", tex "\\begin{align*}x&=1\\end{align*}", tex "\\begin{equation}y\\end{equation}"]]) @?=
+        doc [Para [Str "a", Math DisplayMath "\\begin{align*}x&=1\\end{align*}", Math DisplayMath "\\begin{equation}y\\end{equation}"]]
+  , testCase "other environments are kept" $
+      latexEnvironmentsToMath (doc [Para [tex "\\begin{document}x\\end{document}"]]) @?=
+        doc [Para [tex "\\begin{document}x\\end{document}"]]
+  , testCase "rendered as display math" $
+      either (Left . show) Right (renderCommonMark False (latexEnvironmentsToMath (doc [Para [Str "a", tex "\\begin{gather*}x\\\\y\\end{gather*}", Str "b"]]))) @?=
+        Right "a\\[\\begin{gather*}x\\\\y\\end{gather*}\\]b\n"
+  ]
+  where
+    tex = RawInline (Format "tex")
 
 tweetEmbedsToHtmlTests :: TestTree
 tweetEmbedsToHtmlTests = testGroup "tweetEmbedsToHtml"

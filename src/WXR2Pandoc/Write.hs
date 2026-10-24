@@ -20,6 +20,7 @@ module WXR2Pandoc.Write
   , youtubeVideo
   , tweetEmbedsToHtml
   , tableMathToShortcode
+  , latexEnvironmentsToMath
   , plainNewTabLinks
   , tweetUrl
   , expandOutputPath
@@ -267,6 +268,19 @@ tweetEmbedsToHtml shortcode oembeds = P.walk go
       where needle = "/status/" <> tweetId
     -- A blank line would end the HTML block in CommonMark
     removeBlankLines = T.intercalate "\n" . filter (not . T.all isSpace) . T.lines
+
+-- | Write LaTeX math environments outside math (like @\\begin{align*}...\\end{align*}@) as display math,
+-- since Hugo's passthrough extension finds math only between the delimiters.
+-- Only environments that KaTeX supports at the top level are converted.
+latexEnvironmentsToMath :: Pandoc -> Pandoc
+latexEnvironmentsToMath = P.walk go
+  where
+    go (RawInline (Format "tex") s)
+      | Just rest <- T.stripPrefix "\\begin{" s
+      , T.takeWhile (/= '}') rest `elem` environments
+      = Math DisplayMath s
+    go x = x
+    environments = [name <> star | name <- ["equation", "align", "alignat", "gather"], star <- ["", "*"]]
 
 -- | Write math in tables as Hugo shortcodes @{{< math >}}TeX{{< /math >}}@
 -- (@{{< math display >}}@ for display math).
