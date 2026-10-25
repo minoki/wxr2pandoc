@@ -243,6 +243,27 @@ stripEmptyPara (Para [SoftBreak] : xs) = stripEmptyPara xs
 stripEmptyPara (x : xs)                = x : stripEmptyPara xs
 stripEmptyPara []                      = []
 
+-- | Put an image with class @aligncenter@ (optionally wrapped in a link) in a paragraph of its own.
+-- WordPress themes display such images as blocks even in the middle of a paragraph,
+-- e.g. @<a href="..."><img class="aligncenter" ... /></a>Text...@.
+splitAlignCenterImage :: Block -> [Block]
+splitAlignCenterImage (Para inlines)
+  | any isAlignCenterImage inlines = map Para $ filter (not . null) $ go [] inlines
+  where
+    go revAcc (x : xs)
+      | isAlignCenterImage x = trim (reverse revAcc) : [x] : go [] xs
+      | otherwise = go (x : revAcc) xs
+    go revAcc [] = [trim (reverse revAcc)]
+    trim = dropWhileEnd isSpaceInline . dropWhile isSpaceInline
+    isSpaceInline P.Space   = True
+    isSpaceInline SoftBreak = True
+    isSpaceInline LineBreak = True
+    isSpaceInline _         = False
+    isAlignCenterImage (Image (_, classes, _) _ _) = "aligncenter" `elem` classes
+    isAlignCenterImage (Link _ [img] _)            = isAlignCenterImage img
+    isAlignCenterImage _                           = False
+splitAlignCenterImage block = [block]
+
 -- | Replace no-break spaces (U+00A0) in math with ordinary spaces; KaTeX rejects them in strict mode
 normalizeMathSpace :: Inline -> Inline
 normalizeMathSpace (Math mathType content) = Math mathType (T.replace "\x00A0" " " content)
@@ -258,10 +279,10 @@ collapseNestedLink (Link attr [Link attr' content target'@(url', _)] target@(url
 collapseNestedLink inl = inl
 
 wpHtmlFilter :: Pandoc -> Pandoc
-wpHtmlFilter = P.walk normalizeMathSpace . P.walk unescapeShortcodeInCode . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processLatexShortcode . P.walk processBlockShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
+wpHtmlFilter = P.walk normalizeMathSpace . P.walk unescapeShortcodeInCode . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processLatexShortcode . P.walk (concatMap splitAlignCenterImage) . P.walk processBlockShortcode . P.walk (mergeStr . parseStr) . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass . P.walk (concatMap splitBySoftBreakBlock)
 
 wpBasicHtmlFilter :: Pandoc -> Pandoc
-wpBasicHtmlFilter = P.walk collapseNestedLink . P.walk normalizeMathSpace . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processLatexShortcode . P.walk processBlockShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass
+wpBasicHtmlFilter = P.walk collapseNestedLink . P.walk normalizeMathSpace . P.walk stripEmptyPara . P.walk stripClass . P.walk (concatMap processInlineShortcode) . P.walk processLatexShortcode . P.walk (concatMap splitAlignCenterImage) . P.walk processBlockShortcode . P.walk (concatMap stripWpComment) . P.walk attachCodeBlockClass
 
 unparseShortcode :: Inline -> Inline
 unparseShortcode (RawInline (P.Format "wordpress") content) = Str content

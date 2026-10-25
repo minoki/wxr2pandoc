@@ -171,6 +171,17 @@ inlineTests = testGroup "Inline elements"
       parseWpHtml "<p><img src=\"img.png\" alt=\"Alt text\"></p>" @?=
         doc [Para [Image ("", [], []) [Str "Alt text"] ("img.png", "")]]
 
+  , testCase "aligncenter image is put in its own paragraph" $
+      parseWpHtml "<p>before<br><a href=\"img.png\"><img class=\"aligncenter\" src=\"img.png\"></a>after</p>" @?=
+        doc [ Para [Str "before"]
+            , Para [Link ("", [], []) [Image ("", ["aligncenter"], []) [Str ""] ("img.png", "")] ("img.png", "")]
+            , Para [Str "after"]
+            ]
+
+  , testCase "alignnone image stays in the paragraph" $
+      parseWpHtml "<p><img class=\"alignnone\" src=\"img.png\">after</p>" @?=
+        doc [Para [Image ("", ["alignnone"], []) [Str ""] ("img.png", ""), Str "after"]]
+
   , testCase "strikeout with del" $
       parseWpHtml "<p><del>deleted</del></p>" @?=
         doc [Para [Strikeout [Str "deleted"]]]
