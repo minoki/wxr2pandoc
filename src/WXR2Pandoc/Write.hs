@@ -130,11 +130,13 @@ makeRelativeUrl baseUrl url = do
 -- | Root-relative URL like @/2026/07/hello/@ for an absolute URL into the site,
 -- along with whether it is a media file (under @wp-content/@).
 -- http and https are not distinguished.
+-- Non-ASCII characters (as in file names like @スクリーンショット-1.png@) are kept as they are.
 -- Example: siteRelativeUrl "https://blog.example.com/" "http://blog.example.com/great-article/#a" = Just ("/great-article/#a", False)
 siteRelativeUrl :: T.Text -> T.Text -> Maybe (T.Text, Bool)
 siteRelativeUrl baseUrl url = do
   baseUri <- parseAbsoluteURI (T.unpack baseUrl)
-  targetUri <- parseURI (T.unpack url) -- parseAbsoluteURI rejects fragments
+  let encoded = encodeNonAsciiUrl url
+  targetUri <- parseURI (T.unpack encoded) -- parseAbsoluteURI rejects fragments
   guard $ uriScheme targetUri `elem` ["http:", "https:"]
   baseAuth <- uriAuthority baseUri
   targetAuth <- uriAuthority targetUri
@@ -146,7 +148,10 @@ siteRelativeUrl baseUrl url = do
                      "" -> "/"
                      p  -> p
   rest <- stripPrefix basePath targetPath <|> (if targetPath ++ "/" == basePath then Just "" else Nothing)
-  pure (T.pack (targetPath ++ uriQuery targetUri ++ uriFragment targetUri), "wp-content/" `isPrefixOf` rest)
+  -- The scheme and the authority are ASCII, so they are as long in the original URL
+  let suffix = uriPath targetUri ++ uriQuery targetUri ++ uriFragment targetUri
+      original = T.drop (T.length encoded - length suffix) url
+  pure (if null (uriPath targetUri) then "/" <> original else original, "wp-content/" `isPrefixOf` rest)
 
 -- | Percent-encode non-ASCII characters of a URL (as UTF-8), which Network.URI rejects,
 -- as in file names like @スクリーンショット-1.png@
@@ -242,7 +247,7 @@ imagesToShortcode :: T.Text -> T.Text -> Pandoc -> Pandoc
 imagesToShortcode name baseUrl = P.walk go
   where
     go (Image (ident, classes, kv) alt (url, title))
-      | Just (rel, True) <- siteRelativeUrl baseUrl (encodeNonAsciiUrl url)
+      | Just (rel, True) <- siteRelativeUrl baseUrl url
       , let params = [("src", decodePercent rel), ("alt", stringify alt), ("title", title), ("id", ident), ("class", T.unwords classes)]
                      ++ filter (T.all (\c -> isAlphaNum c || c == '-' || c == '_') . fst) kv
       = RawInline (Format "html") $

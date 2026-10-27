@@ -937,6 +937,12 @@ relativizeSiteUrlsTests = testGroup "relativizeSiteUrls"
       siteRelativeUrl base "https://blog.example.com" @?= Just ("/", False)
   , testCase "media" $
       siteRelativeUrl base "https://blog.example.com/wp-content/uploads/a.jpg" @?= Just ("/wp-content/uploads/a.jpg", True)
+  , testCase "non-ASCII characters are kept" $ do
+      siteRelativeUrl base "https://blog.example.com/wp-content/uploads/スクリーンショット-1.png" @?= Just ("/wp-content/uploads/スクリーンショット-1.png", True)
+      siteRelativeUrl base "https://blog.example.com/2026/07/%E3%81%82/?q=い#う" @?= Just ("/2026/07/%E3%81%82/?q=い#う", False)
+      siteRelativeUrl base "https://blog.example.com?q=あ" @?= Just ("/?q=あ", False)
+      relativizeSiteUrls True Map.empty base (doc [Para [Link nullAttr [Str "a"] ("https://blog.example.com/wp-content/uploads/画像.png", ""), RawInline (Format "html") "<a href=\"https://blog.example.com/wp-content/uploads/画像.png\">"]]) @?=
+        doc [Para [Link nullAttr [Str "a"] ("/wp-content/uploads/画像.png", ""), RawInline (Format "html") "<a href=\"/wp-content/uploads/画像.png\">"]]
   , testCase "other hosts" $ do
       siteRelativeUrl base "https://example.com/2026/07/hello/" @?= Nothing
       siteRelativeUrl base "https://blog.example.com:8080/2026/07/hello/" @?= Nothing
