@@ -466,6 +466,10 @@ shortcodeTests = testGroup "Shortcodes"
       parseWpHtml "<p>[TeX-logo]</p>" @?=
         doc [Para [Span ("", ["TeX-logo"], []) [Str "TeX"]]]
 
+  , testCase "BibTeX-logo shortcode" $
+      parseWpHtml "<p>[BibTeX-logo]</p>" @?=
+        doc [Para [Span ("", ["BibTeX-logo"], []) [Str "BibTeX"]]]
+
   , testCase "shortcode with number in name" $
       parseWpHtml "<p>[h2o]</p>" @?=
         doc [Para [RawInline (Format "wordpress") "[h2o]"]]
@@ -687,6 +691,10 @@ pandocShortcodeTests = testGroup "Shortcodes"
   , testCase "shortcode with hyphen in name" $
       parsePandoc "<p>[TeX-logo]</p>" @?=
         doc [Para [Span ("", ["TeX-logo"], []) [Str "TeX"]]]
+
+  , testCase "BibTeX-logo shortcode" $
+      parsePandoc "<p>[BibTeX-logo]</p>" @?=
+        doc [Para [Span ("", ["BibTeX-logo"], []) [Str "BibTeX"]]]
 
   , testCase "shortcode with number in name" $
       parsePandoc "<p>[h2o]</p>" @?=

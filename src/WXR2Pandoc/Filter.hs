@@ -233,6 +233,7 @@ processInlineShortcode raw@(RawInline (P.Format "wordpress") tag)
       Just ("LaTeX-logo", _) -> [Span ("", ["LaTeX-logo"], []) [Str "LaTeX"]]
       Just ("XeTeX-logo", _) -> [Span ("", ["XeTeX-logo"], []) [Str "XeTeX"]]
       Just ("XeLaTeX-logo", _) -> [Span ("", ["XeLaTeX-logo"], []) [Str "XeLaTeX"]]
+      Just ("BibTeX-logo", _) -> [Span ("", ["BibTeX-logo"], []) [Str "BibTeX"]]
       Just ("xypic-logo", _) -> [Span ("", ["xypic-logo"], []) [Str "Xy-pic"]]
       _ -> [raw]
 processInlineShortcode inl = [inl]
