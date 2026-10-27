@@ -24,7 +24,8 @@ import           Control.Applicative
 import           Control.Concurrent.Async (forConcurrently_)
 import           Control.Concurrent.MVar
 import           Control.Concurrent.QSem
-import           Control.Exception (SomeException, bracket_, try)
+import           Control.Exception (SomeException, bracket_, fromException,
+                                    try)
 import           Control.Monad
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
@@ -37,13 +38,14 @@ import qualified Data.Text.Encoding as T
 import           Network.Connection (TLSSettings (..))
 import           Network.HTTP.Client
 import           Network.HTTP.Client.TLS (mkManagerSettings)
+import           Network.HTTP.Types.Status (statusCode, statusMessage)
 import           Network.TLS (EMSMode (AllowEMS), supportedExtendedMainSecret)
-import           Network.URI (parseAbsoluteURI, uriPath)
+import           Network.URI (parseAbsoluteURI, unEscapeString, uriPath)
 import qualified Options.Applicative as OA
 import           Options.Applicative.Help.Pretty (pretty, vsep)
 import           Paths_wxr2pandoc (version)
 import           System.Directory
-import           System.FilePath (takeDirectory, (</>))
+import           System.FilePath (splitDirectories, takeDirectory, (</>))
 import           System.IO
 import qualified Text.Pandoc.Error as P
 import           WXR2Pandoc.Filter (hoistMathPreamble)
@@ -207,14 +209,15 @@ commandParser = OA.hsubparser
                      ]))
   )
 
--- | Extract the path from a URL for local file storage
+-- | Extract the path from a URL for local file storage.
+-- The path is percent-decoded, so that the file is named like the file on the server.
 urlToLocalPath :: String -> T.Text -> Maybe FilePath
 urlToLocalPath outDir url = do
-  uri <- parseAbsoluteURI (T.unpack url)
-  let path = uriPath uri
+  uri <- parseAbsoluteURI (T.unpack (encodeNonAsciiUrl url))
+  let path = unEscapeString (uriPath uri)
   -- Remove leading slash and ensure path is safe
   let cleanPath = dropWhile (== '/') path
-  if null cleanPath
+  if null cleanPath || ".." `elem` splitDirectories cleanPath
     then Nothing
     else Just (outDir </> cleanPath)
 
@@ -226,10 +229,18 @@ logStderr lock msg = withMVar lock $ \_ -> hPutStrLn stderr msg
 downloadFile :: MVar () -> Manager -> T.Text -> FilePath -> IO ()
 downloadFile lock manager url localPath = do
   logStderr lock $ "Downloading: " ++ T.unpack url
-  request <- parseRequest (T.unpack url)
+  -- parseUrlThrow fails on non-2xx responses instead of saving the error page
+  request <- parseUrlThrow (T.unpack (encodeNonAsciiUrl url))
   response <- httpLbs request manager
   createDirectoryIfMissing True (takeDirectory localPath)
   LBS.writeFile localPath (responseBody response)
+
+-- | Error message of a failed download, without the body of an error response
+describeError :: SomeException -> String
+describeError e = case fromException e of
+  Just (HttpExceptionRequest _ (StatusCodeException response _)) ->
+    "HTTP " ++ show (statusCode (responseStatus response)) ++ " " ++ show (statusMessage (responseStatus response))
+  _ -> show e
 
 -- | Download multiple files in parallel with a concurrency limit
 -- Returns True if completed successfully, False if aborted due to too many failures
@@ -242,6 +253,8 @@ downloadMediaFiles maxParallel maxFailures outDir urls = do
   -- Tracks (failure count, aborted flag)
   stateRef <- newIORef (0 :: Int, False)
   let urlsWithPaths = [(url, path) | url <- urls, Just path <- [urlToLocalPath outDir url]]
+  forM_ [url | url <- urls, Nothing <- [urlToLocalPath outDir url]] $ \url ->
+    hPutStrLn stderr $ "Skipping invalid URL: " ++ T.unpack url
   forConcurrently_ urlsWithPaths $ \(url, localPath) ->
     bracket_ (waitQSem sem) (signalQSem sem) $ do
       (_, aborted) <- readIORef stateRef
@@ -249,7 +262,7 @@ downloadMediaFiles maxParallel maxFailures outDir urls = do
         result <- try $ downloadFile lock manager url localPath
         case result of
           Left (e :: SomeException) -> do
-            logStderr lock $ "Error downloading " ++ T.unpack url ++ ": " ++ show e
+            logStderr lock $ "Error downloading " ++ T.unpack url ++ ": " ++ describeError e
             shouldAbort <- atomicModifyIORef' stateRef $ \(count, aborted') ->
               if aborted'
                 then ((count, True), False)  -- Already aborted

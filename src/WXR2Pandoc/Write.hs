@@ -13,6 +13,7 @@ module WXR2Pandoc.Write
   , writePandocJSONFile
   , makeRelativeUrl
   , siteRelativeUrl
+  , encodeNonAsciiUrl
   , relativizeSiteUrls
   , permalinkPaths
   , siteEmbedsToShortcode
@@ -147,6 +148,11 @@ siteRelativeUrl baseUrl url = do
   rest <- stripPrefix basePath targetPath <|> (if targetPath ++ "/" == basePath then Just "" else Nothing)
   pure (T.pack (targetPath ++ uriQuery targetUri ++ uriFragment targetUri), "wp-content/" `isPrefixOf` rest)
 
+-- | Percent-encode non-ASCII characters of a URL (as UTF-8), which Network.URI rejects,
+-- as in file names like @スクリーンショット-1.png@
+encodeNonAsciiUrl :: T.Text -> T.Text
+encodeNonAsciiUrl = T.pack . escapeURIString isAscii . T.unpack
+
 -- | Root-relative permalinks of published posts and pages by their IDs.
 -- Posts whose permalink is itself a query URL like @/?p=ID@ are skipped.
 permalinkPaths :: [Post] -> Map.Map Int T.Text
@@ -236,14 +242,12 @@ imagesToShortcode :: T.Text -> T.Text -> Pandoc -> Pandoc
 imagesToShortcode name baseUrl = P.walk go
   where
     go (Image (ident, classes, kv) alt (url, title))
-      | Just (rel, True) <- siteRelativeUrl baseUrl (encodeNonAscii url)
+      | Just (rel, True) <- siteRelativeUrl baseUrl (encodeNonAsciiUrl url)
       , let params = [("src", decodePercent rel), ("alt", stringify alt), ("title", title), ("id", ident), ("class", T.unwords classes)]
                      ++ filter (T.all (\c -> isAlphaNum c || c == '-' || c == '_') . fst) kv
       = RawInline (Format "html") $
           "{{< " <> name <> T.concat [" " <> k <> "=" <> jsonString v | (k, v) <- params, not (T.null v)] <> " >}}"
     go x = x
-    -- Network.URI rejects non-ASCII characters (as in file names like スクリーンショット-….png)
-    encodeNonAscii = T.pack . escapeURIString isAscii . T.unpack
     -- The file path of the shortcode is not percent-encoded
     decodePercent = T.pack . unEscapeString . T.unpack
 

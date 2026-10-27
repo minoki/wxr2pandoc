@@ -57,6 +57,7 @@ executable wxr2pandoc
         pandoc-types ^>=1.23.1,
         http-client >=0.7.17 && <0.8,
         http-client-tls >=0.3.6.4 && <0.4,
+        http-types ^>=0.12.4,
         async >=2.2.5 && <2.3,
         network-uri >=2.6.4.2 && <2.8,
         crypton-connection ^>=0.4.5,
