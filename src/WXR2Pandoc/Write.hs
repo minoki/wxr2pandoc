@@ -16,6 +16,7 @@ module WXR2Pandoc.Write
   , relativizeSiteUrls
   , permalinkPaths
   , siteEmbedsToShortcode
+  , imagesToShortcode
   , youtubeEmbedsToShortcode
   , youtubeVideo
   , tweetEmbedsToHtml
@@ -34,8 +35,8 @@ import qualified Data.ByteString as BS
 import           Control.Applicative ((<|>))
 import           Control.Monad (guard)
 import           Control.Monad.State.Strict (runState, state)
-import           Data.Char (isAlphaNum, isDigit, isPunctuation, isSpace,
-                                      isSymbol)
+import           Data.Char (isAlphaNum, isAscii, isDigit, isPunctuation,
+                                      isSpace, isSymbol)
 import           Data.List (isPrefixOf, stripPrefix)
 import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe, maybeToList)
@@ -43,8 +44,9 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Time (LocalTime (..), ZonedTime (..), toGregorian)
 import           Data.Time.Format.ISO8601
-import           Network.URI (URI (..), URIAuth (..), parseAbsoluteURI,
-                                      parseURI)
+import           Network.URI (URI (..), URIAuth (..), escapeURIString,
+                                      parseAbsoluteURI, parseURI,
+                                      unEscapeString)
 import           Text.Pandoc.Class (runPure)
 import           Text.Pandoc.Definition as P
 import qualified Text.Pandoc.Error as P
@@ -52,6 +54,7 @@ import           Text.Pandoc.Extensions
 import qualified Text.Pandoc.Options as P
 import           Text.Pandoc.Options (ReaderOptions (..), WriterOptions (..),
                                       def)
+import           Text.Pandoc.Shared (stringify)
 import           Text.Pandoc.Readers.HTML (readHtml)
 import           Text.Pandoc.Templates
 import qualified Text.Pandoc.Walk as P
@@ -223,6 +226,26 @@ siteEmbedsToShortcode name baseUrl = P.walk go
       , Just (rel, False) <- siteRelativeUrl baseUrl url
       = RawBlock (Format "commonmark") ("{{< " <> name <> " " <> jsonString rel <> " >}}")
     go b = b
+
+-- | Replace images of media files of the site (under @wp-content/@) with a Hugo shortcode
+-- like @{{< wp-image src="/wp-content/uploads/a-300x200.jpg" class="wp-image-1" >}}@,
+-- given the shortcode name and the base URL, so that the theme can make thumbnails
+-- from the full-size images instead of WordPress's.
+-- The other attributes of the image are given as parameters of the same names.
+imagesToShortcode :: T.Text -> T.Text -> Pandoc -> Pandoc
+imagesToShortcode name baseUrl = P.walk go
+  where
+    go (Image (ident, classes, kv) alt (url, title))
+      | Just (rel, True) <- siteRelativeUrl baseUrl (encodeNonAscii url)
+      , let params = [("src", decodePercent rel), ("alt", stringify alt), ("title", title), ("id", ident), ("class", T.unwords classes)]
+                     ++ filter (T.all (\c -> isAlphaNum c || c == '-' || c == '_') . fst) kv
+      = RawInline (Format "html") $
+          "{{< " <> name <> T.concat [" " <> k <> "=" <> jsonString v | (k, v) <- params, not (T.null v)] <> " >}}"
+    go x = x
+    -- Network.URI rejects non-ASCII characters (as in file names like スクリーンショット-….png)
+    encodeNonAscii = T.pack . escapeURIString isAscii . T.unpack
+    -- The file path of the shortcode is not percent-encoded
+    decodePercent = T.pack . unEscapeString . T.unpack
 
 -- | Replace YouTube embed blocks (@wp-block-embed@) with Hugo's built-in shortcode
 -- like @{{< youtube id="ID" start="10" >}}@.

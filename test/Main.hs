@@ -23,6 +23,7 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    relativizeSiteUrls, renderCommonMark,
                                    separateCodeBlockFromMore,
                                    separateLeadingRawElements,
+                                   imagesToShortcode,
                                    siteEmbedsToShortcode, siteRelativeUrl,
                                    unflankedEmphasisToHtml, urlRewriterContent,
                                    plainNewTabLinks, tableMathToShortcode,
@@ -61,6 +62,7 @@ tests = testGroup "WXR2Pandoc"
   , postMetadataTests
   , relativizeSiteUrlsTests
   , siteEmbedsToShortcodeTests
+  , imagesToShortcodeTests
   , youtubeEmbedsToShortcodeTests
   , tweetEmbedsToHtmlTests
   , tableMathToShortcodeTests
@@ -1003,6 +1005,31 @@ siteEmbedsToShortcodeTests = testGroup "siteEmbedsToShortcode"
     base = "https://blog.example.com/"
     embed url = Figure ("", ["wp-block-embed", "is-type-wp-embed"], []) (Caption Nothing [])
       [Div ("", ["wp-block-embed__wrapper"], []) [Plain [SoftBreak, Str url, SoftBreak]]]
+
+imagesToShortcodeTests :: TestTree
+imagesToShortcodeTests = testGroup "imagesToShortcode"
+  [ testCase "image of a media file of the site" $
+      imagesToShortcode "wp-image" base (doc [Para [Image ("", ["wp-image-1"], [("width", "300"), ("height", "200")]) [Str ""] ("https://blog.example.com/wp-content/uploads/2026/04/a-300x200.jpg", "")]]) @?=
+        doc [Para [RawInline (Format "html") "{{< wp-image src=\"/wp-content/uploads/2026/04/a-300x200.jpg\" class=\"wp-image-1\" width=\"300\" height=\"200\" >}}"]]
+  , testCase "alt, title and quotes" $
+      imagesToShortcode "wp-image" base (doc [Para [Image nullAttr [Str "a", Space, Str "\"b\""] ("https://blog.example.com/wp-content/uploads/a.png", "t")]]) @?=
+        doc [Para [RawInline (Format "html") "{{< wp-image src=\"/wp-content/uploads/a.png\" alt=\"a \\\"b\\\"\" title=\"t\" >}}"]]
+  , testCase "non-ASCII and percent-encoded file names" $ do
+      imagesToShortcode "wp-image" base (doc [Para [Image nullAttr [] ("https://blog.example.com/wp-content/uploads/スクリーンショット-1-300x200.png", "")]]) @?=
+        doc [Para [RawInline (Format "html") "{{< wp-image src=\"/wp-content/uploads/スクリーンショット-1-300x200.png\" >}}"]]
+      imagesToShortcode "wp-image" base (doc [Para [Image nullAttr [] ("https://blog.example.com/wp-content/uploads/a%20b%E3%81%82.png", "")]]) @?=
+        doc [Para [RawInline (Format "html") "{{< wp-image src=\"/wp-content/uploads/a bあ.png\" >}}"]]
+  , testCase "images of other sites and pages are kept" $ do
+      let other = doc [Para [Image nullAttr [] ("https://example.org/wp-content/uploads/a.png", "")]]
+          page = doc [Para [Image nullAttr [] ("https://blog.example.com/2026/04/a.png", "")]]
+      imagesToShortcode "wp-image" base other @?= other
+      imagesToShortcode "wp-image" base page @?= page
+  , testCase "rendered as is in a link" $
+      either (Left . show) Right (renderCommonMark False (imagesToShortcode "wp-image" base (doc [Para [Link nullAttr [Image nullAttr [] ("https://blog.example.com/wp-content/uploads/a-300x200.jpg", "")] ("https://blog.example.com/wp-content/uploads/a.jpg", "")]]))) @?=
+        Right "[{{< wp-image src=\"/wp-content/uploads/a-300x200.jpg\" >}}](https://blog.example.com/wp-content/uploads/a.jpg)\n"
+  ]
+  where
+    base = "https://blog.example.com/"
 
 youtubeEmbedsToShortcodeTests :: TestTree
 youtubeEmbedsToShortcodeTests = testGroup "youtubeEmbedsToShortcode"
