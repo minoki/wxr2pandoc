@@ -5,8 +5,10 @@ module WXR2Pandoc.WXR
   , Post(..)
   , Item(..)
   , Category(..)
+  , Tag(..)
   , processFile
   , processCategories
+  , processTags
   ) where
 import           Control.Monad
 import           Data.Char
@@ -35,7 +37,7 @@ data Post = Post { postType         :: PostType
                  , postName         :: T.Text
                  , postStatus       :: T.Text -- publish, draft, inherit
                  , postCategories   :: [T.Text] -- slugs (nicename)
-                 , postTags         :: [T.Text]
+                 , postTags         :: [T.Text] -- slugs (nicename)
                  , postThumbnail    :: Maybe T.Text -- URL of the featured image
                  , postOembeds      :: [T.Text] -- HTML in the oEmbed cache (_oembed_* post meta)
                  }
@@ -52,6 +54,13 @@ data Category = Category { categorySlug        :: T.Text -- decoded nicename
                          , categoryDescription :: T.Text
                          }
               deriving (Show)
+
+-- | A tag defined by @<wp:tag>@ in the channel
+data Tag = Tag { tagSlug        :: T.Text -- decoded slug
+               , tagName        :: T.Text
+               , tagDescription :: T.Text
+               }
+         deriving (Show)
 
 namespace_dc, namespace_wp, namespace_content :: Maybe T.Text
 namespace_dc = Just "http://purl.org/dc/elements/1.1/"
@@ -131,7 +140,7 @@ processFile filename = do
                            slug:_ -> [decodeSlug slug]
                            []     -> XC.child c >>= XC.content
     let categories = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isCategory >=> categorySlug
-    let tags = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isTag >=> XC.child >=> XC.content
+    let tags = item XC.$| XC.child >=> XC.element (XC.Name "category" Nothing Nothing) >=> XC.checkElement isTag >=> categorySlug
     let postmeta key = item XC.$| XC.child >=> XC.element (XC.Name "postmeta" namespace_wp Nothing)
                                  >=> XC.check (\m -> mconcat (m XC.$/ XC.element (XC.Name "meta_key" namespace_wp Nothing) XC.&/ XC.content) == key)
                                  >=> XC.child >=> XC.element (XC.Name "meta_value" namespace_wp Nothing) >=> XC.child >=> XC.content
@@ -210,3 +219,15 @@ processCategories filename = do
              , categoryParent = if T.null parent then Nothing else Just (decodeSlug parent)
              , categoryDescription = field "category_description"
              }
+
+processTags :: FilePath -> IO [Tag]
+processTags filename = do
+  doc <- XC.readFile XC.def filename
+  let doc_cursor = XC.fromDocument doc
+  let tags = doc_cursor XC.$| XC.child >=> XC.element (XC.Name "channel" Nothing Nothing) >=> XC.child >=> XC.element (XC.Name "tag" namespace_wp Nothing)
+  pure $ flip map tags $ \tag -> do
+    let field name = T.strip $ mconcat (tag XC.$| XC.child >=> XC.element (XC.Name name namespace_wp Nothing) >=> XC.child >=> XC.content)
+    Tag { tagSlug = decodeSlug (field "tag_slug")
+        , tagName = field "tag_name"
+        , tagDescription = field "tag_description"
+        }

@@ -49,14 +49,15 @@ import qualified Text.Pandoc.Error as P
 import           WXR2Pandoc.Filter (hoistMathPreamble)
 import           WXR2Pandoc.Write
 import           WXR2Pandoc.WXR (Category (..), Item (..), Post (..),
-                                 PostType (..), postName, processCategories,
-                                 processFile)
+                                 PostType (..), Tag (..), postName,
+                                 processCategories, processFile, processTags)
 
 -- | Subcommand type
 data Command
   = ConvertAll (Maybe PostType) ConvertAllOptions -- ^ Nothing converts both posts and pages
   | DownloadMedia DownloadMediaOptions
   | ExportCategories ExportCategoriesOptions
+  | ExportTags ExportTagsOptions
   | GenerateUrlRewriter GenerateUrlRewriterOptions
 
 -- | Options for convert-all, convert-posts and convert-pages subcommands
@@ -90,6 +91,12 @@ data ExportCategoriesOptions = ExportCategoriesOptions
   { ecOutputDir    :: String
   , ecCategoryBase :: T.Text
   , ecInputXml     :: String
+  }
+
+-- | Options for export-tags subcommand
+data ExportTagsOptions = ExportTagsOptions
+  { etOutputDir :: String
+  , etInputXml  :: String
   }
 
 -- | Options for generate-url-rewriter subcommand
@@ -126,6 +133,11 @@ exportCategoriesOptions :: OA.Parser ExportCategoriesOptions
 exportCategoriesOptions = ExportCategoriesOptions
   <$> OA.strOption (OA.long "output" <> OA.metavar "DIR" <> OA.help "Output directory, e.g. content/categories; each category is written to DIR/<slug>/_index.md (required)")
   <*> OA.strOption (OA.long "category-base" <> OA.metavar "PATH" <> OA.value "category" <> OA.showDefault <> OA.help "Category base of the WordPress permalinks, used for the 'url' of child categories")
+  <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
+
+exportTagsOptions :: OA.Parser ExportTagsOptions
+exportTagsOptions = ExportTagsOptions
+  <$> OA.strOption (OA.long "output" <> OA.metavar "DIR" <> OA.help "Output directory, e.g. content/tags; each tag is written to DIR/<slug>/_index.md (required)")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 generateUrlRewriterOptions :: OA.Parser GenerateUrlRewriterOptions
@@ -176,6 +188,13 @@ commandParser = OA.hsubparser
                 <> footerLines
                      [ "Example:"
                      , "  wxr2pandoc export-categories --output content/categories WordPress.xml"
+                     ]))
+  <> OA.command "export-tags"
+      (OA.info (ExportTags <$> exportTagsOptions)
+               (OA.progDesc "Write a Hugo term page (_index.md) for each tag in a WXR file"
+                <> footerLines
+                     [ "Example:"
+                     , "  wxr2pandoc export-tags --output content/tags WordPress.xml"
                      ]))
   <> OA.command "generate-url-rewriter"
       (OA.info (GenerateUrlRewriter <$> generateUrlRewriterOptions)
@@ -257,6 +276,7 @@ main = do
     ConvertAll typ options -> runConvertAll typ options
     DownloadMedia options -> runDownloadMedia options
     ExportCategories options -> runExportCategories options
+    ExportTags options -> runExportTags options
     GenerateUrlRewriter options -> runGenerateUrlRewriter options
 
 -- | Run convert-all subcommand, or convert-posts/convert-pages if a post type is given
@@ -316,6 +336,15 @@ runExportCategories ExportCategoriesOptions {..} = do
     let path = ecOutputDir </> T.unpack (categorySlug c) </> "_index.md"
     createDirectoryIfMissing True (takeDirectory path)
     BS.writeFile path $ T.encodeUtf8 $ categoryIndexContent ecCategoryBase categories c
+
+-- | Run export-tags subcommand
+runExportTags :: ExportTagsOptions -> IO ()
+runExportTags ExportTagsOptions {..} = do
+  tags <- processTags etInputXml
+  forM_ tags $ \t -> do
+    let path = etOutputDir </> T.unpack (tagSlug t) </> "_index.md"
+    createDirectoryIfMissing True (takeDirectory path)
+    BS.writeFile path $ T.encodeUtf8 $ tagIndexContent t
 
 -- | Run generate-url-rewriter subcommand
 runGenerateUrlRewriter :: GenerateUrlRewriterOptions -> IO ()

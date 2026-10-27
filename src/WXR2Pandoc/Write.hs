@@ -26,6 +26,7 @@ module WXR2Pandoc.Write
   , tweetUrl
   , expandOutputPath
   , categoryIndexContent
+  , tagIndexContent
   , urlRewriterContent
   ) where
 import qualified Data.Aeson as JSON
@@ -665,6 +666,15 @@ categoryIndexContent categoryBase allCategories category =
                      Nothing     -> []
                      Just parent -> maybe [parent] go (Map.lookup parent bySlug)
     url = "/" <> T.intercalate "/" (filter (not . T.null) (T.splitOn "/" categoryBase) ++ ancestors) <> "/"
+
+-- | Render a Hugo term page (@content/tags/<slug>/_index.md@) for a tag.
+tagIndexContent :: Tag -> T.Text
+tagIndexContent tag =
+  T.unlines $
+    ["+++"
+    ,"title = " <> tomlString (tagName tag)]
+    ++ ["description = " <> tomlString description | let description = tagDescription tag, not (T.null description)]
+    ++ ["+++"]
 
 -- | Render an Apache @.htaccess@ that redirects @/?p=ID@ and @/?page_id=ID@
 -- to the permalinks of published posts and pages.
