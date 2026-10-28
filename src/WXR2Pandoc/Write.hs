@@ -515,7 +515,13 @@ renderCommonMark delimiterEntities doc = do
     writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unflankedEmphasisToHtml $ P.walk separateCodeBlockFromMore $ P.walk separateLeadingRawElements $ P.walk unparseShortcode doc'
   pure $ insertFrontMatter quotedLines content
   where
-    (quotedLines, doc') = takeQuotedStringLists doc
+    (quotedLines, doc') = takeQuotedStrings doc
+
+-- | Keys written as quoted strings, like @title: "\\\\verb"@.
+-- Pandoc would write them as Markdown text, escaping backslashes and other
+-- punctuation, but Hugo reads them as plain strings.
+quotedStringKeys :: [T.Text]
+quotedStringKeys = ["title", "slug", "url"]
 
 -- | Keys written as lists of quoted strings, like @years: ["2026"]@.
 -- Pandoc writes @2026@ without quotes, which YAML reads as a number,
@@ -523,13 +529,16 @@ renderCommonMark delimiterEntities doc = do
 quotedStringListKeys :: [T.Text]
 quotedStringListKeys = ["years", "months", "images"]
 
--- | Remove the 'quotedStringListKeys' from the metadata and render them as YAML lines
-takeQuotedStringLists :: Pandoc -> ([T.Text], Pandoc)
-takeQuotedStringLists (Pandoc (Meta meta) body) =
-  ( [ key <> ": [" <> T.intercalate ", " (map jsonString values) <> "]"
+-- | Remove the 'quotedStringKeys' and 'quotedStringListKeys' from the metadata and render them as YAML lines
+takeQuotedStrings :: Pandoc -> ([T.Text], Pandoc)
+takeQuotedStrings (Pandoc (Meta meta) body) =
+  ( [ key <> ": " <> jsonString value
+    | key <- quotedStringKeys, Just (MetaString value) <- [Map.lookup key meta] ]
+    ++
+    [ key <> ": [" <> T.intercalate ", " (map jsonString values) <> "]"
     | key <- quotedStringListKeys, Just (MetaList items) <- [Map.lookup key meta]
     , let values = [v | MetaString v <- items] ]
-  , Pandoc (Meta (foldr Map.delete meta quotedStringListKeys)) body )
+  , Pandoc (Meta (foldr Map.delete meta (quotedStringKeys ++ quotedStringListKeys))) body )
 
 -- | A JSON string, which is also a YAML double-quoted string and a Go (Hugo shortcode) string
 jsonString :: T.Text -> T.Text
