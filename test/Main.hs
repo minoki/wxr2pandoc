@@ -21,7 +21,7 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    mathDelimitersToEntities, parsePostWith,
                                    permalinkPaths,
                                    relativizeSiteUrls, renderCommonMark,
-                                   separateCodeBlockFromMore,
+                                   separateCodeBlockFromMore, headingIdAttributes,
                                    separateLeadingRawElements,
                                    imagesToShortcode,
                                    siteEmbedsToShortcode, siteRelativeUrl,
@@ -58,6 +58,7 @@ tests = testGroup "WXR2Pandoc"
   , mathDelimitersToEntitiesTests
   , unflankedEmphasisToHtmlTests
   , separateCodeBlockFromMoreTests
+  , headingIdAttributesTests
   , separateLeadingRawElementsTests
   , postMetadataTests
   , relativizeSiteUrlsTests
@@ -811,6 +812,20 @@ unflankedEmphasisToHtmlTests = testGroup "unflankedEmphasisToHtml"
   ]
   where
     html = Format "html"
+
+headingIdAttributesTests :: TestTree
+headingIdAttributesTests = testGroup "headingIdAttributes"
+  [ testCase "heading with an id" $
+      render [Header 2 ("intro", ["section"], []) [Str "Intro"]] @?= Right "## Intro {#intro}\n"
+  , testCase "heading without an id" $
+      render [Header 2 ("", ["section"], []) [Str "Intro"]] @?= Right "## Intro\n"
+  , testCase "non-ASCII letters and dots" $
+      render [Header 3 ("1.successor-mlとは", [], []) [Str "a"]] @?= Right "### a {#1.successor-mlとは}\n"
+  , testCase "other punctuation" $
+      render [Header 3 ("a&b\"c", [], []) [Str "a"]] @?= Right "### a {id=\"a&b\\\"c\"}\n"
+  ]
+  where
+    render = either (Left . show) Right . renderCommonMark False . doc
 
 separateCodeBlockFromMoreTests :: TestTree
 separateCodeBlockFromMoreTests = testGroup "separateCodeBlockFromMore"

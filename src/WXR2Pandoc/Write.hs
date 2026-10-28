@@ -9,6 +9,7 @@ module WXR2Pandoc.Write
   , mathDelimitersToEntities
   , unflankedEmphasisToHtml
   , separateCodeBlockFromMore
+  , headingIdAttributes
   , separateLeadingRawElements
   , writePandocJSONFile
   , makeRelativeUrl
@@ -512,7 +513,7 @@ renderCommonMark delimiterEntities doc = do
     let tpl = case tplResult of
                 Left e  -> error e
                 Right t -> t
-    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unflankedEmphasisToHtml $ P.walk separateCodeBlockFromMore $ P.walk separateLeadingRawElements $ P.walk unparseShortcode doc'
+    writeCommonMark (writerOptions { writerTemplate = Just tpl }) $ rawMathPreamble $ (if delimiterEntities then P.walk mathDelimitersToEntities else id) $ P.walk unflankedEmphasisToHtml $ P.walk separateCodeBlockFromMore $ P.walk separateLeadingRawElements $ P.walk headingIdAttributes $ P.walk unparseShortcode doc'
   pure $ insertFrontMatter quotedLines content
   where
     (quotedLines, doc') = takeQuotedStrings doc
@@ -636,6 +637,20 @@ separateCodeBlockFromMore (b : xs@(CodeBlock attr _ : _))
     isMore s = T.strip s == "<!--more-->"
 separateCodeBlockFromMore (b : xs) = b : separateCodeBlockFromMore xs
 separateCodeBlockFromMore [] = []
+
+-- | Write the identifier of a heading as a Goldmark attribute like @## Title {#id}@,
+-- so that links to the heading keep working; Hugo would otherwise generate one from the title.
+-- Classes and other attributes are dropped.
+headingIdAttributes :: Block -> Block
+headingIdAttributes (Header level (ident, _, _) inls)
+  | not (T.null ident) = Header level nullAttr (inls ++ [RawInline (Format "commonmark") (" {" <> attr <> "}")])
+  where
+    attr | T.all plainChar ident = "#" <> ident
+         | otherwise = "id=\"" <> T.concatMap escape ident <> "\""
+    plainChar c = not (isSpace c) && (not (isAscii c && (isPunctuation c || isSymbol c)) || c `elem` ("-_:." :: String))
+    escape c | c `elem` ("\\\"" :: String) = T.pack ['\\', c]
+             | otherwise = T.singleton c
+headingIdAttributes b = b
 
 -- | Split @<style>@ and @<script>@ elements at the start of a paragraph into a raw HTML block.
 -- CommonMark treats the rest of the line after such an element as part of the HTML block,
