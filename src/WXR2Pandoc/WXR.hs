@@ -9,10 +9,16 @@ module WXR2Pandoc.WXR
   , processFile
   , processCategories
   , processTags
+  , PhpValue(..)
+  , parsePhpSerialized
+  , attachmentSizeFilesOf
+  , attachmentOriginalFileOf
   ) where
 import           Control.Monad
+import qualified Data.Attoparsec.Text as A
 import           Data.Char
 import qualified Data.Map as Map
+import           Data.Maybe (listToMaybe, mapMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
 import           Data.Time
@@ -44,7 +50,10 @@ data Post = Post { postType         :: PostType
           deriving (Show)
 
 data Item = ItemPost Post
-          | ItemAttachment { attachmentUrl :: T.Text }
+          | ItemAttachment { attachmentUrl :: T.Text
+                           , attachmentSizeFiles :: [T.Text] -- ^ file names of the intermediate sizes made by WordPress (like @a-300x200.jpg@), in the same directory
+                           , attachmentOriginalFile :: Maybe T.Text -- ^ file name of the original image before it was edited in WordPress, in the same directory
+                           }
           deriving (Show)
 
 -- | A category defined by @<wp:category>@ in the channel
@@ -78,6 +87,48 @@ computeZonedTime (Just local) (Just gmt) =
 computeZonedTime (Just local) Nothing =
   Just $ ZonedTime local utc
 computeZonedTime Nothing _ = Nothing
+
+-- | A value serialized by PHP's @serialize@, as in the post meta of attachments
+data PhpValue = PhpString T.Text
+              | PhpInt Integer
+              | PhpArray [(PhpValue, PhpValue)]
+              | PhpOther -- ^ float, boolean, null or object
+              deriving (Eq, Show)
+
+-- | Parse a value serialized by PHP's @serialize@
+parsePhpSerialized :: T.Text -> Maybe PhpValue
+parsePhpSerialized = either (const Nothing) Just . A.parseOnly (valueP <* A.endOfInput)
+  where
+    valueP = A.choice
+      [ PhpString <$> (A.string "s:" *> A.decimal <* A.string ":\"" >>= utf8Take) <* A.string "\";"
+      , PhpInt <$> (A.string "i:" *> A.signed A.decimal <* A.char ';')
+      , PhpArray <$> (A.string "a:" *> A.decimal <* A.string ":{" >>= \n -> A.count n ((,) <$> valueP <*> valueP)) <* A.char '}'
+      , PhpOther <$ (A.satisfy (`elem` ("db" :: String)) *> A.char ':' *> A.takeWhile (/= ';') *> A.char ';')
+      , PhpOther <$ A.string "N;"
+      ]
+    -- The length of a string is in bytes of UTF-8
+    utf8Take :: Int -> A.Parser T.Text
+    utf8Take = A.scan `flip` \n c -> if n <= 0 then Nothing else Just (n - utf8Length c)
+    utf8Length c | ord c < 0x80 = 1
+                 | ord c < 0x800 = 2
+                 | ord c < 0x10000 = 3
+                 | otherwise = 4 :: Int
+
+phpLookup :: T.Text -> PhpValue -> Maybe PhpValue
+phpLookup key (PhpArray kvs) = lookup (PhpString key) kvs
+phpLookup _ _ = Nothing
+
+-- | File names of the intermediate sizes in @_wp_attachment_metadata@ of an attachment
+attachmentSizeFilesOf :: T.Text -> [T.Text]
+attachmentSizeFilesOf meta = case parsePhpSerialized meta >>= phpLookup "sizes" of
+  Just (PhpArray sizes) -> [file | (_, size) <- sizes, Just (PhpString file) <- [phpLookup "file" size]]
+  _ -> []
+
+-- | File name of the original image (@full-orig@) in @_wp_attachment_backup_sizes@ of an edited attachment
+attachmentOriginalFileOf :: T.Text -> Maybe T.Text
+attachmentOriginalFileOf meta = case parsePhpSerialized meta >>= phpLookup "full-orig" >>= phpLookup "file" of
+  Just (PhpString file) -> Just file
+  _ -> Nothing
 
 -- | Decode a percent-encoded slug like @%e9%89%84%e9%81%93@.
 -- 'unEscapeString' also decodes UTF-8.
@@ -198,7 +249,10 @@ processFile filename = do
       "attachment" -> do
         let attachment_url = mconcat (item XC.$| XC.child >=> XC.element (XC.Name "attachment_url" namespace_wp Nothing) >=> XC.child >=> XC.content)
         -- putStrLn $ T.unpack attachment_url
-        pure [ItemAttachment { attachmentUrl = attachment_url }]
+        pure [ItemAttachment { attachmentUrl = attachment_url
+                             , attachmentSizeFiles = concatMap attachmentSizeFilesOf (postmeta "_wp_attachment_metadata")
+                             , attachmentOriginalFile = listToMaybe (mapMaybe attachmentOriginalFileOf (postmeta "_wp_attachment_backup_sizes"))
+                             }]
       "nav_menu_item" -> pure []
       "wp_global_styles" -> pure []
       "wp_navigation" -> pure []

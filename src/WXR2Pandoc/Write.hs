@@ -27,6 +27,8 @@ module WXR2Pandoc.Write
   , tableMathToShortcode
   , latexEnvironmentsToMath
   , numberEquations
+  , fullSizeMediaFiles
+  , fullSizeMediaLinks
   , plainNewTabLinks
   , tweetUrl
   , expandOutputPath
@@ -395,6 +397,38 @@ tableMathToShortcode = P.walk table
     math (Math InlineMath s)  = RawInline (Format "html") ("{{< math >}}" <> s <> "{{< /math >}}")
     math (Math DisplayMath s) = RawInline (Format "html") ("{{< math display >}}" <> s <> "{{< /math >}}")
     math x = x
+
+-- | Site-relative paths of the intermediate sizes of images made by WordPress
+-- (like @/wp-content/uploads/2026/07/a-1024x683.jpg@) with the file names of their full-size images
+-- (like @a.jpg@), given the base URL and the items of the export file
+fullSizeMediaFiles :: T.Text -> [Item] -> Map.Map T.Text T.Text
+fullSizeMediaFiles baseUrl items = Map.fromList
+  [ (dir <> size, full)
+  | ItemAttachment { attachmentUrl = url, attachmentSizeFiles = sizes } <- items
+  , Just (rel, True) <- [siteRelativeUrl baseUrl url]
+  , let (dir, full) = T.breakOnEnd "/" rel
+  , size <- sizes
+  , size /= full ]
+
+-- | Rewrite links to the intermediate sizes of images (Markdown links and @href@ in raw HTML),
+-- which download-media does not download, into links to the full-size images,
+-- given the base URL and 'fullSizeMediaFiles'.
+-- Only the file name is replaced, so that absolute URLs stay absolute.
+-- The sources of images are left as they are, since the theme makes thumbnails from the full-size images.
+fullSizeMediaLinks :: T.Text -> Map.Map T.Text T.Text -> Pandoc -> Pandoc
+fullSizeMediaLinks baseUrl fullFiles = P.walk block . P.walk inline
+  where
+    rewrite url = case Map.lookup (maybe url fst (siteRelativeUrl baseUrl url)) fullFiles of
+                    Just full -> fst (T.breakOnEnd "/" url) <> full
+                    Nothing   -> url
+    inline (Link attr ils (url, title)) = Link attr ils (rewrite url, title)
+    inline (RawInline f@(Format "html") s) = RawInline f (rawHtml s)
+    inline x = x
+    block (RawBlock f@(Format "html") s) = RawBlock f (rawHtml s)
+    block x = x
+    rawHtml s = case T.splitOn "href=\"" s of
+                  first : rest -> T.intercalate "href=\"" (first : [ rewrite u <> r | piece <- rest, let (u, r) = T.break (== '"') piece ])
+                  [] -> s
 
 -- | Drop the attributes of links that only open in a new tab
 -- (@target="_blank"@ and @rel@ with @noopener@ and/or @noreferrer@, which WordPress adds),

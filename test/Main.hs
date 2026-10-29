@@ -28,12 +28,15 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    imagesToShortcode,
                                    siteEmbedsToShortcode, siteRelativeUrl,
                                    unflankedEmphasisToHtml, urlRewriterContent,
+                                   fullSizeMediaFiles, fullSizeMediaLinks,
                                    plainNewTabLinks, tableMathToShortcode,
                                    latexEnvironmentsToMath, numberEquations,
                                    tweetEmbedsToHtml,
                                    tweetUrl,
                                    youtubeEmbedsToShortcode, youtubeVideo)
-import           WXR2Pandoc.WXR (Post (..), PostType (..))
+import           WXR2Pandoc.WXR (Item (..), PhpValue (..), Post (..),
+                                 PostType (..), attachmentOriginalFileOf,
+                                 attachmentSizeFilesOf, parsePhpSerialized)
 
 main :: IO ()
 main = defaultMain tests
@@ -72,6 +75,8 @@ tests = testGroup "WXR2Pandoc"
   , tableMathToShortcodeTests
   , latexEnvironmentsToMathTests
   , numberEquationsTests
+  , attachmentMetadataTests
+  , fullSizeMediaLinksTests
   , plainNewTabLinksTests
   , urlRewriterContentTests
   ]
@@ -1128,6 +1133,52 @@ youtubeEmbedsToShortcodeTests = testGroup "youtubeEmbedsToShortcode"
     caption = Caption Nothing [Plain [Str "video"]]
     wrapper url = Div ("", ["wp-block-embed__wrapper"], []) [Plain [SoftBreak, Str url, SoftBreak]]
     embed url = Figure ("", ["wp-block-embed", "is-provider-youtube"], []) (Caption Nothing []) [wrapper url]
+
+attachmentMetadataTests :: TestTree
+attachmentMetadataTests = testGroup "attachment metadata"
+  [ testCase "parsePhpSerialized" $ do
+      parsePhpSerialized "a:3:{s:1:\"a\";i:-1;i:0;d:1.5;s:4:\"list\";a:1:{i:0;N;}}" @?=
+        Just (PhpArray [(PhpString "a", PhpInt (-1)), (PhpInt 0, PhpOther), (PhpString "list", PhpArray [(PhpInt 0, PhpOther)])])
+  , testCase "string lengths in bytes of UTF-8" $
+      parsePhpSerialized "s:6:\"あ\";\"\";" @?= Just (PhpString "あ\";\"")
+  , testCase "attachmentSizeFilesOf" $
+      attachmentSizeFilesOf "a:3:{s:5:\"width\";i:1280;s:4:\"file\";s:21:\"2021/03/IMG_9896.jpeg\";s:5:\"sizes\";a:2:{s:6:\"medium\";a:2:{s:4:\"file\";s:21:\"IMG_9896-300x200.jpeg\";s:5:\"width\";i:300;}s:5:\"large\";a:2:{s:4:\"file\";s:22:\"IMG_9896-1024x683.jpeg\";s:5:\"width\";i:1024;}}}"
+        @?= ["IMG_9896-300x200.jpeg", "IMG_9896-1024x683.jpeg"]
+  , testCase "attachmentOriginalFileOf" $ do
+      attachmentOriginalFileOf "a:2:{s:9:\"full-orig\";a:2:{s:5:\"width\";i:2550;s:4:\"file\";s:7:\"fc2.png\";}s:14:\"thumbnail-orig\";a:1:{s:4:\"file\";s:15:\"fc2-150x150.png\";}}"
+        @?= Just "fc2.png"
+      attachmentOriginalFileOf "a:1:{s:14:\"thumbnail-orig\";a:1:{s:4:\"file\";s:15:\"fc2-150x150.png\";}}" @?= Nothing
+      attachmentOriginalFileOf "broken" @?= Nothing
+  ]
+
+fullSizeMediaLinksTests :: TestTree
+fullSizeMediaLinksTests = testGroup "fullSizeMediaLinks"
+  [ testCase "fullSizeMediaFiles" $
+      fullSizeMediaFiles base [attachment] @?=
+        Map.fromList [("/wp-content/uploads/2021/03/a-300x200.jpg", "a.jpg"), ("/wp-content/uploads/2021/03/a-1024x683.jpg", "a.jpg")]
+  , testCase "absolute and root-relative links" $ do
+      rewrite [Para [link "https://blog.example.com/wp-content/uploads/2021/03/a-1024x683.jpg"]] @?=
+        doc [Para [link "https://blog.example.com/wp-content/uploads/2021/03/a.jpg"]]
+      rewrite [Para [link "/wp-content/uploads/2021/03/a-300x200.jpg"]] @?=
+        doc [Para [link "/wp-content/uploads/2021/03/a.jpg"]]
+  , testCase "href in raw HTML" $
+      rewrite [RawBlock html "<a href=\"https://blog.example.com/wp-content/uploads/2021/03/a-1024x683.jpg\"><img src=\"https://blog.example.com/wp-content/uploads/2021/03/a-1024x683.jpg\"></a>"] @?=
+        doc [RawBlock html "<a href=\"https://blog.example.com/wp-content/uploads/2021/03/a.jpg\"><img src=\"https://blog.example.com/wp-content/uploads/2021/03/a-1024x683.jpg\"></a>"]
+  , testCase "images and other links are untouched" $ do
+      let image = Image nullAttr [] ("/wp-content/uploads/2021/03/a-1024x683.jpg", "")
+      rewrite [Para [image]] @?= doc [Para [image]]
+      rewrite [Para [link "/wp-content/uploads/2021/03/b-1024x683.jpg"]] @?= doc [Para [link "/wp-content/uploads/2021/03/b-1024x683.jpg"]]
+      rewrite [Para [link "https://other.example.com/wp-content/uploads/2021/03/a-1024x683.jpg"]] @?=
+        doc [Para [link "https://other.example.com/wp-content/uploads/2021/03/a-1024x683.jpg"]]
+  ]
+  where
+    base = "https://blog.example.com/"
+    attachment = ItemAttachment { attachmentUrl = "https://blog.example.com/wp-content/uploads/2021/03/a.jpg"
+                                , attachmentSizeFiles = ["a-300x200.jpg", "a-1024x683.jpg"]
+                                , attachmentOriginalFile = Nothing }
+    rewrite = fullSizeMediaLinks base (fullSizeMediaFiles base [attachment]) . doc
+    link url = Link nullAttr [Str "x"] (url, "")
+    html = Format "html"
 
 plainNewTabLinksTests :: TestTree
 plainNewTabLinksTests = testGroup "plainNewTabLinks"

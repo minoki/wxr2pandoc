@@ -79,6 +79,7 @@ data ConvertAllOptions = ConvertAllOptions
   , caTweetEmbeds :: Bool
   , caHugo :: Bool
   , caUseIdsFromToc :: Bool
+  , caFullSizeMediaLinks :: Bool
   , caInputXml   :: String
   }
 
@@ -87,6 +88,7 @@ data DownloadMediaOptions = DownloadMediaOptions
   { dmOutputDir           :: String
   , dmMaxParallelDownloads :: Int
   , dmMaxDownloadFailures  :: Int
+  , dmIncludeOriginals     :: Bool
   , dmInputXml            :: String
   }
 
@@ -126,6 +128,7 @@ convertAllOptions = ConvertAllOptions
   <*> OA.switch (OA.long "tweet-embeds" <> OA.help "Replace X (Twitter) embed blocks with the tweet HTML in WordPress's oEmbed cache, or with Hugo's built-in shortcode like {{< x user=\"USER\" id=\"ID\" >}} if not cached (with --hugo)")
   <*> OA.switch (OA.long "hugo" <> OA.help "Write Hugo shortcodes: YouTube embed blocks as {{< youtube id=\"ID\" start=\"10\" >}}, and math in tables (written as raw HTML) as {{< math >}}TeX{{< /math >}}, which the theme has to provide. Links that only open in a new tab (target=\"_blank\" with rel=\"noopener noreferrer\") are written as Markdown links, leaving new tabs to the theme. Also enables the shortcodes of --embed-shortcode and --tweet-embeds")
   <*> OA.switch (OA.long "use-ids-from-toc" <> OA.help "Give the headings of posts with the [toc] shortcode the ids that the Table of Contents Plus plugin generated on WordPress (like #Heading_text), in place of the ids in the export file, so that links to the headings keep working")
+  <*> OA.switch (OA.long "full-size-media-links" <> OA.help "Rewrite links to the intermediate sizes of images made by WordPress (like a-1024x683.jpg), which download-media does not download, into links to the full-size images (with --base-url)")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 downloadMediaOptions :: OA.Parser DownloadMediaOptions
@@ -133,6 +136,7 @@ downloadMediaOptions = DownloadMediaOptions
   <$> OA.strOption (OA.long "output" <> OA.metavar "DIR" <> OA.help "Output directory; files are saved under DIR by their URL path (required)")
   <*> OA.option OA.auto (OA.long "max-parallel-downloads" <> OA.metavar "N" <> OA.value 5 <> OA.showDefault <> OA.help "Maximum parallel downloads")
   <*> OA.option OA.auto (OA.long "max-download-failures" <> OA.metavar "N" <> OA.value 5 <> OA.showDefault <> OA.help "Abort after N download failures")
+  <*> OA.switch (OA.long "include-originals" <> OA.help "Also download the original images of images edited in WordPress (like a.png for a-e1234567890.png), which posts may link to")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 exportCategoriesOptions :: OA.Parser ExportCategoriesOptions
@@ -307,6 +311,7 @@ runConvertAll typ ConvertAllOptions {..} = do
         Left e -> hPutStrLn stderr $ "Error: " ++ T.unpack (P.renderError e) ++ " while reading " ++ T.unpack (postName p)
         Right doc0 -> do
           let doc = maybe id (relativizeSiteUrls caRelativeMedia permalinks) caBaseUrl $
+                    maybe id (\base -> fullSizeMediaLinks base (fullSizeMediaFiles base items)) (guard caFullSizeMediaLinks *> caBaseUrl) $
                     maybe id (uncurry imagesToShortcode) ((,) <$> (guard caHugo *> caImageShortcode) <*> caBaseUrl) $
                     maybe id (uncurry siteEmbedsToShortcode) ((,) <$> (guard caHugo *> caEmbedShortcode) <*> caBaseUrl) $
                     (if caHugo then plainNewTabLinks . youtubeEmbedsToShortcode . tableMathToShortcode else id) $
@@ -330,7 +335,7 @@ runConvertAll typ ConvertAllOptions {..} = do
             createDirectoryIfMissing True (takeDirectory txtPath)
             BS.writeFile txtPath $ T.encodeUtf8 $ postContent p
     ItemPost _ -> pure ()
-    ItemAttachment _ -> pure ()
+    ItemAttachment {} -> pure ()
 
 -- | Run download-media subcommand
 runDownloadMedia :: DownloadMediaOptions -> IO ()
@@ -338,7 +343,8 @@ runDownloadMedia DownloadMediaOptions {..} = do
   items <- processFile dmInputXml
   let allMediaUrls = concatMap extractMediaUrlsFromItem items
       extractMediaUrlsFromItem (ItemPost _)         = []
-      extractMediaUrlsFromItem (ItemAttachment url) = [url]
+      extractMediaUrlsFromItem ItemAttachment { attachmentUrl = url, attachmentOriginalFile = original } =
+        url : [fst (T.breakOnEnd "/" url) <> file | dmIncludeOriginals, Just file <- [original]]
       uniqueUrls = nub allMediaUrls
   if null uniqueUrls
     then hPutStrLn stderr "No media files to download."
