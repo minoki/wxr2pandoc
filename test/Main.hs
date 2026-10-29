@@ -4,6 +4,7 @@ module Main (main) where
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
+import           Data.List (intercalate)
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import           Data.Time (LocalTime (..), TimeOfDay (..), ZonedTime (..),
@@ -22,6 +23,7 @@ import           WXR2Pandoc.Write (HTMLReader (..), expandOutputPath,
                                    permalinkPaths,
                                    relativizeSiteUrls, renderCommonMark,
                                    separateCodeBlockFromMore, headingIdAttributes,
+                                   tocPluginAnchor, tocPluginIds,
                                    separateLeadingRawElements,
                                    imagesToShortcode,
                                    siteEmbedsToShortcode, siteRelativeUrl,
@@ -59,6 +61,7 @@ tests = testGroup "WXR2Pandoc"
   , unflankedEmphasisToHtmlTests
   , separateCodeBlockFromMoreTests
   , headingIdAttributesTests
+  , tocPluginIdsTests
   , separateLeadingRawElementsTests
   , postMetadataTests
   , relativizeSiteUrlsTests
@@ -826,6 +829,42 @@ headingIdAttributesTests = testGroup "headingIdAttributes"
   ]
   where
     render = either (Left . show) Right . renderCommonMark False . doc
+
+tocPluginIdsTests :: TestTree
+tocPluginIdsTests = testGroup "tocPluginIds"
+  [ testCase "ASCII parts of the text" $ do
+      anchor (text "Unicode文字列リテラル") @?= "Unicode"
+      anchor (text "HaMLetが動くようになった（※Luaインタープリターの改造が必要）") @?= "HaMLetLua"
+      anchor (text "D言語 (std.complex)") @?= "D_stdcomplex"
+  , testCase "spaces" $ do
+      anchor (text "record extension / update (Successor ML)") @?= "record_extension_update_Successor_ML"
+      anchor (text "オレオレ Num クラスを作る際に障害になること") @?= "_Num"
+      anchor (text "交差型 (intersection type) と 合併型 (union type)") @?= "_intersection_type__union_type"
+  , testCase "no ASCII letters" $ do
+      anchor (text "型推論の所要時間の短縮") @?= "i"
+      anchor (text "0日目 高瀬ダム") @?= "i"
+  , testCase "character references and wptexturize" $ do
+      anchor (text "自分自身への関数 a -> a (Endo)") @?= "_a_-gt_a_Endo"
+      anchor (text "LuajitTeXでrequire \"lfs\"できない") @?= "LuajitTeXrequire_8220lfs8221"
+      anchor (text "SML '97の変な仕様") @?= "SML_821797"
+      anchor (text "A & B") @?= "A_B"
+  , testCase "no wptexturize in code" $
+      anchor (text "wxUSE_UNSAFE_WXSTRING_CONV / " ++ [Code nullAttr "--disable-unsafe_conv_in_wxstring", Space, Str "について"])
+        @?= "wxUSE_UNSAFE_WXSTRING_CONV_--disable-unsafe_conv_in_wxstring"
+  , testCase "accents and nested inlines" $ do
+      anchor (text "Ryū（2018年）") @?= "Ryu2018"
+      anchor [Span ("", ["TeX-logo"], []) [Str "TeX"], Str "の", Emph [Str "Lua"]] @?= "TeXLua"
+  , testCase "unique ids in a post with [toc]" $
+      tocPluginIds (doc [Para [toc], heading "a" "見出し", heading "" "別の見出し", heading "" "見出し"]) @?=
+        doc [Para [toc], heading "i" "見出し", heading "i-2" "別の見出し", heading "i-3" "見出し"]
+  , testCase "post without [toc] is untouched" $
+      tocPluginIds (doc [heading "a" "見出し"]) @?= doc [heading "a" "見出し"]
+  ]
+  where
+    anchor = tocPluginAnchor
+    toc = RawInline (Format "html") "<!--toc-->"
+    heading ident t = Header 2 (ident, [], []) (text t)
+    text = intercalate [Space] . map (\w -> [Str w]) . T.splitOn " "
 
 separateCodeBlockFromMoreTests :: TestTree
 separateCodeBlockFromMoreTests = testGroup "separateCodeBlockFromMore"

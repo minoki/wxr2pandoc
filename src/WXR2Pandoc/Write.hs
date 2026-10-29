@@ -10,6 +10,8 @@ module WXR2Pandoc.Write
   , unflankedEmphasisToHtml
   , separateCodeBlockFromMore
   , headingIdAttributes
+  , tocPluginIds
+  , tocPluginAnchor
   , separateLeadingRawElements
   , writePandocJSONFile
   , makeRelativeUrl
@@ -651,6 +653,96 @@ headingIdAttributes (Header level (ident, _, _) inls)
     escape c | c `elem` ("\\\"" :: String) = T.pack ['\\', c]
              | otherwise = T.singleton c
 headingIdAttributes b = b
+
+-- | In a post with the @[toc]@ shortcode (written as @<!--toc-->@), give every heading
+-- the identifier that the Table of Contents Plus plugin gave it on WordPress
+-- (see 'tocPluginAnchor'), in place of any existing one,
+-- so that links to the headings of the old blog keep working.
+-- The plugin added the identifiers when displaying the post, so they are not in the export file.
+tocPluginIds :: Pandoc -> Pandoc
+tocPluginIds doc@(Pandoc meta body)
+  | null (P.query isToc body) = doc
+  | otherwise = Pandoc meta $ fst $ runState (P.walkM go body) Map.empty
+  where
+    isToc (RawInline (Format "html") "<!--toc-->") = [()]
+    isToc _ = []
+    go (Header level (_, classes, kv) inls) = do
+      ident <- state (unique (tocPluginAnchor inls))
+      pure (Header level (ident, classes, kv) inls)
+    go b = pure b
+    -- The second and later headings with the same anchor get -2, -3, ...
+    unique a seen = case Map.lookup a seen of
+      Nothing -> (a, Map.insert a (1 :: Int) seen)
+      Just n  -> (a <> "-" <> T.pack (show (n + 1)), Map.insert a (n + 1) seen)
+
+-- | Anchor that the Table of Contents Plus plugin generates from the content of a heading
+-- (@url_anchor_target@ of the plugin), before making it unique in the post.
+-- The plugin works on the HTML being displayed, where @&@, @<@ and @>@ are character references
+-- and quotes are made typographic by @wptexturize@ outside of code; it deletes @&amp;@,
+-- deletes the characters other than ASCII letters, digits, spaces, @-@ and @_@,
+-- replaces two spaces and then a space with @_@, and trims @-@ and @_@ at the end.
+-- An empty anchor (or @0@, which is false in PHP) becomes @i@.
+-- Latin letters with diacritics are converted into ASCII like @remove_accents@ of WordPress.
+tocPluginAnchor :: [Inline] -> T.Text
+tocPluginAnchor inls
+  | anchor `elem` ["", "0"] = "i"
+  | otherwise = anchor
+  where
+    anchor = T.dropWhileEnd (`elem` ("-_" :: String))
+           $ T.replace " " "_" $ T.replace "  " "_"
+           $ T.filter (\c -> isAscii c && (isAlphaNum c || c `elem` (" -_" :: String)))
+           $ T.concatMap removeAccent
+           $ T.replace "&amp;" ""
+           $ T.concat [ if isCode then escape t else texturize (escape t) | (isCode, t) <- groupSegments (concatMap segments inls) ]
+    segments (Str t) = [(False, t)]
+    segments P.Space = [(False, " ")]
+    segments SoftBreak = [(False, " ")]
+    segments LineBreak = []
+    segments (Code _ t) = [(True, t)]
+    segments (Math _ t) = [(False, t)]
+    segments (RawInline (Format "wordpress") t) = [(False, t)]
+    segments (RawInline _ _) = []
+    segments (Image {}) = []
+    segments (Note _) = []
+    segments (Quoted SingleQuote xs) = [(False, "'")] ++ concatMap segments xs ++ [(False, "'")]
+    segments (Quoted DoubleQuote xs) = [(False, "\"")] ++ concatMap segments xs ++ [(False, "\"")]
+    segments (Emph xs) = concatMap segments xs
+    segments (Underline xs) = concatMap segments xs
+    segments (Strong xs) = concatMap segments xs
+    segments (Strikeout xs) = concatMap segments xs
+    segments (Superscript xs) = concatMap segments xs
+    segments (Subscript xs) = concatMap segments xs
+    segments (SmallCaps xs) = concatMap segments xs
+    segments (Cite _ xs) = concatMap segments xs
+    segments (Link _ xs _) = concatMap segments xs
+    segments (Span _ xs) = concatMap segments xs
+    groupSegments ((c, s) : (c', s') : rest) | c == c' = groupSegments ((c, s <> s') : rest)
+    groupSegments (x : rest) = x : groupSegments rest
+    groupSegments [] = []
+    escape = T.replace ">" "&gt;" . T.replace "<" "&lt;" . T.replace "&" "&amp;"
+    -- The part of wptexturize that matters for headings
+    texturize = T.pack . go ' ' . T.unpack
+              . T.replace "--" "&#8211;" . T.replace " -- " " &#8212; " . T.replace "---" "&#8212;"
+              . T.replace "..." "&#8230;"
+      where
+        go _ ('\'' : rest@(d1 : d2 : rest')) | isDigit d1, isDigit d2, not (startsWithDigit rest') = "&#8217;" ++ go '\'' rest -- '97
+        go prev ('"' : rest) = (if opening prev then "&#8220;" else "&#8221;") ++ go '"' rest
+        go prev ('\'' : rest) = (if opening prev then "&#8216;" else "&#8217;") ++ go '\'' rest
+        go _ (c : rest) = c : go c rest
+        go _ [] = []
+        opening prev = isSpace prev || prev `elem` ("([{" :: String)
+        startsWithDigit (c : _) = isDigit c
+        startsWithDigit [] = False
+    removeAccent c = fromMaybe (T.singleton c) (Map.lookup c accents)
+
+-- | ASCII letters for Latin letters with diacritics (U+00C0 to U+024F), used by 'tocPluginAnchor'
+accents :: Map.Map Char T.Text
+accents = Map.fromList $
+  zip "ÀÁÂÃÄÅÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝàáâãäåçèéêëìíîïñòóôõöùúûüýÿĀāĂăĄąĆćĈĉĊċČčĎďĒēĔĕĖėĘęĚěĜĝĞğĠġĢģĤĥĨĩĪīĬĭĮįİĴĵĶķĹĺĻļĽľŃńŅņŇňŌōŎŏŐőŔŕŖŗŘřŚśŜŝŞşŠšŢţŤťŨũŪūŬŭŮůŰűŲųŴŵŶŷŸŹźŻżŽžƠơƯưǍǎǏǐǑǒǓǔǕǖǗǘǙǚǛǜǞǟǠǡǦǧǨǩǪǫǬǭǰǴǵǸǹǺǻȀȁȂȃȄȅȆȇȈȉȊȋȌȍȎȏȐȑȒȓȔȕȖȗȘșȚțȞȟȦȧȨȩȪȫȬȭȮȯȰȱȲȳ"
+      (map T.singleton "AAAAAACEEEEIIIINOOOOOUUUUYaaaaaaceeeeiiiinooooouuuuyyAaAaAaCcCcCcCcDdEeEeEeEeEeGgGgGgGgHhIiIiIiIiIJjKkLlLlLlNnNnNnOoOoOoRrRrRrSsSsSsSsTtTtUuUuUuUuUuUuWwYyYZzZzZzOoUuAaIiOoUuUuUuUuUuAaAaGgKkOoOojGgNnAaAaAaEeEeIiIiOoOoRrRrUuUuSsTtHhAaEeOoOoOoOoYy")
+  ++ [ ('ß', "ss"), ('Æ', "AE"), ('æ', "ae"), ('Ø', "O"), ('ø', "o"), ('Œ', "OE"), ('œ', "oe")
+     , ('Ð', "D"), ('ð', "d"), ('Đ', "D"), ('đ', "d"), ('Ħ', "H"), ('ħ', "h"), ('Ł', "L"), ('ł', "l")
+     , ('Þ', "TH"), ('þ', "th") ]
 
 -- | Split @<style>@ and @<script>@ elements at the start of a paragraph into a raw HTML block.
 -- CommonMark treats the rest of the line after such an element as part of the HTML block,

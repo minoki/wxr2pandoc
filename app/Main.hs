@@ -78,6 +78,7 @@ data ConvertAllOptions = ConvertAllOptions
   , caImageShortcode :: Maybe T.Text
   , caTweetEmbeds :: Bool
   , caHugo :: Bool
+  , caUseIdsFromToc :: Bool
   , caInputXml   :: String
   }
 
@@ -124,6 +125,7 @@ convertAllOptions = ConvertAllOptions
   <*> optional (OA.strOption (OA.long "image-shortcode" <> OA.metavar "NAME" <> OA.help "Replace images of media files of the site with a Hugo shortcode like {{< NAME src=\"/wp-content/uploads/a-300x200.jpg\" class=\"wp-image-1\" >}}, for the theme to make thumbnails from the full-size images (with --hugo and --base-url)"))
   <*> OA.switch (OA.long "tweet-embeds" <> OA.help "Replace X (Twitter) embed blocks with the tweet HTML in WordPress's oEmbed cache, or with Hugo's built-in shortcode like {{< x user=\"USER\" id=\"ID\" >}} if not cached (with --hugo)")
   <*> OA.switch (OA.long "hugo" <> OA.help "Write Hugo shortcodes: YouTube embed blocks as {{< youtube id=\"ID\" start=\"10\" >}}, and math in tables (written as raw HTML) as {{< math >}}TeX{{< /math >}}, which the theme has to provide. Links that only open in a new tab (target=\"_blank\" with rel=\"noopener noreferrer\") are written as Markdown links, leaving new tabs to the theme. Also enables the shortcodes of --embed-shortcode and --tweet-embeds")
+  <*> OA.switch (OA.long "use-ids-from-toc" <> OA.help "Give the headings of posts with the [toc] shortcode the ids that the Table of Contents Plus plugin generated on WordPress (like #Heading_text), in place of the ids in the export file, so that links to the headings keep working")
   <*> OA.argument OA.str (OA.metavar "FILE.xml" <> OA.help "WordPress export file (WXR)")
 
 downloadMediaOptions :: OA.Parser DownloadMediaOptions
@@ -311,7 +313,8 @@ runConvertAll typ ConvertAllOptions {..} = do
                     (if caMathRefs then numberEquations else id) $
                     (if caTweetEmbeds then tweetEmbedsToHtml caHugo (postOembeds p) else id) $
                     latexEnvironmentsToMath $
-                    if caHoistMathPreamble then hoistMathPreamble doc0 else doc0
+                    (if caHoistMathPreamble then hoistMathPreamble else id) $
+                    (if caUseIdsFromToc then tocPluginIds else id) doc0
           let getOutputPath ext = case caOutputPath of
                 Just tpl -> caOutputDir ++ "/" ++ T.unpack (expandOutputPath tpl caBaseUrl p ext)
                 Nothing  -> caOutputDir ++ "/" ++ show (postId p) ++ "-" ++ T.unpack (postName p) ++ "." ++ T.unpack ext
